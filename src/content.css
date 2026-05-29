@@ -1,0 +1,130 @@
+.vra-relist-button {
+  appearance: none;
+  align-items: center;
+  background: #0b6b5f;
+  border: 1px solid #075249;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  display: inline-flex;
+  font: 600 13px/1.2 Arial, sans-serif;
+  justify-content: center;
+  min-height: var(--vra-bump-height, 32px);
+  min-width: var(--vra-bump-width, 72px);
+  padding: 0 10px;
+  position: relative;
+  text-decoration: none;
+  z-index: 5;
+}
+
+.vra-relist-button:hover {
+  background: #075249;
+}
+
+.vra-relist-button:disabled {
+  background: #88918f;
+  border-color: #88918f;
+  cursor: default;
+}
+
+.vra-button-wrap {
+  display: flex;
+  flex: 0 0 100%;
+  margin-left: 0;
+  margin-top: 6px;
+  position: relative;
+  width: fit-content;
+  z-index: 5;
+}
+
+.vra-modal-backdrop {
+  align-items: center;
+  background: rgba(17, 24, 39, 0.48);
+  bottom: 0;
+  display: flex;
+  font-family: Arial, sans-serif;
+  justify-content: center;
+  left: 0;
+  padding: 20px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 2147483647;
+}
+
+.vra-modal {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 16px 44px rgba(17, 24, 39, 0.24);
+  color: #17211f;
+  max-width: 440px;
+  padding: 20px;
+  width: min(440px, 100%);
+}
+
+.vra-modal h2 {
+  font: 700 18px/1.25 Arial, sans-serif;
+  margin: 0 0 10px;
+}
+
+.vra-modal p {
+  font: 14px/1.45 Arial, sans-serif;
+  margin: 0 0 18px;
+}
+
+.vra-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.vra-modal-actions button {
+  border-radius: 6px;
+  cursor: pointer;
+  font: 600 14px/1.2 Arial, sans-serif;
+  min-height: 36px;
+  padding: 8px 12px;
+}
+
+.vra-modal-actions [data-vra-confirm] {
+  background: #0b6b5f;
+  border: 1px solid #075249;
+  color: #fff;
+}
+
+.vra-modal-actions [data-vra-cancel] {
+  background: #fff;
+  border: 1px solid #bcc8c5;
+  color: #17211f;
+}
+
+.vra-toast-stack {
+  bottom: 18px;
+  display: grid;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 36px));
+  position: fixed;
+  right: 18px;
+  z-index: 2147483647;
+}
+
+.vra-toast {
+  background: #17211f;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(17, 24, 39, 0.2);
+  color: #fff;
+  font: 14px/1.4 Arial, sans-serif;
+  padding: 12px 14px;
+}
+
+.vra-toast[data-kind="success"] {
+  background: #0b6b5f;
+}
+
+.vra-toast[data-kind="error"] {
+  background: #9f2f24;
+}
+
+.vra-toast[data-kind="warning"] {
+  background: #805b00;
+}

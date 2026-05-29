@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Vinted Relist Assistant</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header>
+      <h1>Vinted Relist Assistant</h1>
+      <button id="refresh" type="button" title="Refresh">Refresh</button>
+    </header>
+
+    <main>
+      <section class="status">
+        <p id="summary">Loading backups...</p>
+      </section>
+
+      <section id="backup-list" class="backup-list" aria-live="polite"></section>
+    </main>
+
+    <footer>
+      <button id="clear-expired" type="button">Clear expired</button>
+    </footer>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

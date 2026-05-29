@@ -1,0 +1,145 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  background: #f6f8f7;
+  color: #17211f;
+  font: 14px/1.4 Arial, sans-serif;
+  margin: 0;
+  min-width: 360px;
+}
+
+header {
+  align-items: center;
+  background: #fff;
+  border-bottom: 1px solid #dce4e1;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+h1 {
+  font-size: 16px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+main {
+  padding: 12px 14px;
+}
+
+button {
+  background: #fff;
+  border: 1px solid #bcc8c5;
+  border-radius: 6px;
+  color: #17211f;
+  cursor: pointer;
+  font: 600 13px/1.2 Arial, sans-serif;
+  min-height: 32px;
+  padding: 7px 10px;
+}
+
+button:hover {
+  border-color: #0b6b5f;
+}
+
+.status {
+  background: #eaf3f1;
+  border: 1px solid #cee1dc;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  padding: 10px;
+}
+
+.status p {
+  margin: 0;
+}
+
+.backup-list {
+  display: grid;
+  gap: 10px;
+  max-height: 460px;
+  overflow: auto;
+}
+
+.backup {
+  background: #fff;
+  border: 1px solid #dce4e1;
+  border-radius: 8px;
+  padding: 10px;
+}
+
+.backup h2 {
+  font-size: 14px;
+  line-height: 1.25;
+  margin: 0 0 6px;
+}
+
+.meta {
+  color: #586763;
+  font-size: 12px;
+  margin: 0 0 8px;
+}
+
+.status-pill {
+  background: #e6ebe9;
+  border-radius: 999px;
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  padding: 3px 8px;
+}
+
+.status-pill.failed {
+  background: #f8ded9;
+  color: #8c261d;
+}
+
+.status-pill.form_filled {
+  background: #dff0ea;
+  color: #075249;
+}
+
+.details {
+  color: #2b3835;
+  font-size: 12px;
+  margin: 0 0 10px;
+}
+
+.messages {
+  border-top: 1px solid #edf1ef;
+  display: grid;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+}
+
+.message {
+  color: #7d2e22;
+  font-size: 12px;
+  margin: 0;
+}
+
+.warning {
+  color: #795600;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+footer {
+  background: #fff;
+  border-top: 1px solid #dce4e1;
+  padding: 10px 14px;
+}
+
+.empty {
+  color: #586763;
+  margin: 18px 0;
+  text-align: center;
+}
