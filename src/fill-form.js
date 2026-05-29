@@ -318,7 +318,7 @@
       debugFill("colour:opened", { colour, opened });
       if (!opened) return filledAny;
 
-      await waitForOptional(() => findColourOption(colour) || findOpenPickerSearchInput("colour"), 1400);
+      await waitForOptional(() => findColourOption(colour) || findOpenPickerSearchInput("colour"), 700);
 
       let option = findColourOption(colour);
       debugFill("colour:option", { colour, found: Boolean(option), title: option ? colourOptionTitle(option) : "" });
@@ -327,7 +327,7 @@
         if (searchInput) {
           debugFill("colour:search", { colour });
           pasteControlValue(searchInput, colour);
-          await delay(250);
+          await delay(120);
           option = findColourOption(colour);
           debugFill("colour:option-after-search", { colour, found: Boolean(option), title: option ? colourOptionTitle(option) : "" });
         }
@@ -346,7 +346,7 @@
       }
 
       filledAny = true;
-      await delay(100);
+      await delay(40);
     }
 
     closeOpenPicker();
@@ -363,15 +363,15 @@
       const opened = await openSizeField();
       if (!opened) {
         closeOpenPicker();
-        await delay(250);
+        await delay(100);
         continue;
       }
 
-      await waitForOptional(() => findSizeOption(size), 1800);
+      await waitForOptional(() => findSizeOption(size), 800);
       const option = findSizeOption(size);
       if (!option) {
         closeOpenPicker();
-        await delay(250);
+        await delay(100);
         continue;
       }
 
@@ -379,7 +379,7 @@
       if (selected) return true;
 
       closeOpenPicker();
-      await delay(350);
+      await delay(120);
     }
 
     return false;
@@ -402,7 +402,7 @@
     debugFill("condition:opened", { condition, conditionId, opened });
     if (!opened) return false;
 
-    await waitForOptional(() => findConditionOption(condition), 1400);
+    await waitForOptional(() => findConditionOption(condition), 700);
     const option = findConditionOption(condition);
     debugFill("condition:option", { condition, conditionId, found: Boolean(option), title: option ? conditionOptionTitle(option) : "" });
     if (!option) {
@@ -531,25 +531,25 @@
 
   async function openSizeField() {
     closeOpenPicker();
-    await delay(300);
+    await delay(100);
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (findOpenSizeDropdownContent()) return true;
 
-      const opener = await waitForOptional(() => findReadySizeOpener(), 1800);
+      const opener = await waitForOptional(() => findReadySizeOpener(), 900);
       if (!opener) return false;
 
       for (const target of sizeOpenerClickTargets(opener)) {
         target.scrollIntoView({ block: "center", inline: "nearest" });
-        await delay(120);
+        await delay(40);
         clickElement(target);
 
-        const opened = await waitForOptional(() => findOpenSizeDropdownContent(), 1400);
+        const opened = await waitForOptional(() => findOpenSizeDropdownContent(), 650);
         if (opened) return true;
       }
 
       closeOpenPicker();
-      await delay(350);
+      await delay(120);
     }
 
     return false;
@@ -660,11 +660,11 @@
       if (!currentOption) return false;
 
       currentOption.scrollIntoView({ block: "center", inline: "nearest" });
-      await delay(80);
+      await delay(40);
 
       for (const target of sizeOptionClickTargets(currentOption)) {
         activateOption(target);
-        const selected = await waitForOptional(() => currentSizeSelectionMatches(size), 1400);
+        const selected = await waitForOptional(() => currentSizeSelectionMatches(size), 650);
         if (selected) return true;
       }
 
@@ -745,33 +745,33 @@
 
   async function openConditionField() {
     closeOpenPicker();
-    await delay(300);
+    await delay(100);
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       if (findOpenConditionDropdownContent()) return true;
 
-      const opener = await waitForOptional(() => findReadyConditionOpener(), 1800);
+      const opener = await waitForOptional(() => findReadyConditionOpener(), 900);
       if (!opener) return false;
 
       for (const target of conditionOpenerClickTargets(opener)) {
         target.scrollIntoView({ block: "center", inline: "nearest" });
-        await delay(120);
+        await delay(40);
         clickElement(target);
 
-        const opened = await waitForOptional(() => findOpenConditionDropdownContent(), 1400);
+        const opened = await waitForOptional(() => findOpenConditionDropdownContent(), 650);
         if (opened) return true;
       }
 
       closeOpenPicker();
-      await delay(350);
+      await delay(120);
     }
 
     return false;
   }
 
   async function waitForConditionFieldSettled() {
-    await waitForOptional(() => findReadyConditionOpener(), 2500);
-    await delay(450);
+    await waitForOptional(() => findReadyConditionOpener(), 1000);
+    await delay(150);
   }
 
   function findReadyConditionOpener() {
@@ -893,11 +893,11 @@
       if (!currentOption) return false;
 
       currentOption.scrollIntoView({ block: "center", inline: "nearest" });
-      await delay(70);
+      await delay(40);
 
       for (const target of conditionOptionClickTargets(currentOption)) {
         clickElement(target);
-        const selected = await waitForOptional(() => currentConditionSelectionMatches(condition) || !isStillVisible(currentOption), 1200);
+        const selected = await waitForOptional(() => currentConditionSelectionMatches(condition) || !isStillVisible(currentOption), 650);
         if (selected) return true;
       }
 
@@ -934,10 +934,10 @@
   async function selectConditionById(conditionId, condition) {
     for (const target of conditionRadioClickTargets(conditionId)) {
       target.scrollIntoView({ block: "center", inline: "nearest" });
-      await delay(70);
+      await delay(40);
       clickElement(target);
 
-      const selected = await waitForOptional(() => currentConditionRadioChecked(conditionId) || currentConditionSelectionMatches(condition), 1200);
+      const selected = await waitForOptional(() => currentConditionRadioChecked(conditionId) || currentConditionSelectionMatches(condition), 650);
       if (selected) return true;
     }
 
@@ -978,17 +978,17 @@
 
   async function openColourField() {
     closeOpenPicker();
-    await delay(150);
+    await delay(80);
 
     const opener = findColourOpener();
     if (!opener) return false;
 
     for (const target of colourOpenerClickTargets(opener)) {
       target.scrollIntoView({ block: "center", inline: "nearest" });
-      await delay(70);
+      await delay(40);
       clickElement(target);
 
-      const opened = await waitForOptional(() => findOpenColourDropdownContent(), 1200);
+      const opened = await waitForOptional(() => findOpenColourDropdownContent(), 650);
       if (opened) return true;
     }
 
@@ -1075,11 +1075,11 @@
 
   async function selectColourOption(option, colour) {
     option.scrollIntoView({ block: "center", inline: "nearest" });
-    await delay(70);
+    await delay(40);
 
     for (const target of colourOptionClickTargets(option)) {
       activateOption(target);
-      const selected = await waitForOptional(() => currentColourSelectionIncludes(colour) || optionHasCheckedInput(option), 1200);
+      const selected = await waitForOptional(() => currentColourSelectionIncludes(colour) || optionHasCheckedInput(option), 650);
       if (selected) return true;
     }
 
