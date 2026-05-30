@@ -23,10 +23,17 @@
   ]);
 
   await expandCollapsedDescription();
+  await revealListingDetails();
+  const directColour = await waitForDirectColourAttribute();
+  const attributeWait = await waitForListingAttributes();
   const description = extractDescription(root, title, jsonLdProduct);
 
   const price = extractPrice(jsonLdProduct, root);
   const attributes = extractAttributes(root);
+  const jsonLdColour = extractJsonLdColour(jsonLdProduct);
+  if (jsonLdColour.value && !attributes.colour) attributes.colour = jsonLdColour.value;
+  const explicitColour = directColour.value ? directColour : extractExplicitColourAttribute(document);
+  if (explicitColour.value) attributes.colour = explicitColour.value;
   if (jsonLdProduct && jsonLdProduct.brand && !attributes.brand) {
     attributes.brand = typeof jsonLdProduct.brand === "string" ? jsonLdProduct.brand : jsonLdProduct.brand.name;
   }
@@ -61,6 +68,13 @@
       description,
       price,
       attributes,
+      extractDebug: {
+        colour: {
+          explicit: explicitColour,
+          jsonLd: jsonLdColour,
+          attributeWait
+        }
+      },
       images
     },
     warnings
@@ -104,6 +118,28 @@
     if (type === "Product" || (Array.isArray(type) && type.includes("Product"))) return value;
     if (value["@graph"]) return findProduct(value["@graph"]);
     return null;
+  }
+
+  function extractJsonLdColour(product) {
+    const raw = product && (product.color || product.colour);
+    const values = normalizeJsonLdValue(raw);
+    let value = "";
+    for (const candidate of values) {
+      value = mergeColourAttributeValues(value, candidate);
+    }
+    return {
+      value,
+      rawCandidates: values.slice(0, 5)
+    };
+  }
+
+  function normalizeJsonLdValue(value) {
+    if (!value) return [];
+    if (Array.isArray(value)) return value.flatMap(normalizeJsonLdValue);
+    if (typeof value === "object") {
+      return normalizeJsonLdValue(value.name || value.value || value["@value"] || "");
+    }
+    return [cleanText(value)].filter(Boolean);
   }
 
   function extractPrice(product, rootElement) {
@@ -288,14 +324,20 @@
       const values = Array.from(item.querySelectorAll(".details-list__item-value"));
       const label = cleanTextFromElement(values[0] || item);
       const key = testIdMap[testKey] || labelMap[label];
-      if (!key || attributes[key]) continue;
+      if (!key || (key !== "colour" && attributes[key])) continue;
 
-      const valueElement = values[1] ||
-        attributeValueElementFor(item, entry.source) ||
-        item.querySelector(".web_ui__Text__subtitle.web_ui__Text__bold, [class*='web_ui__Text__subtitle'][class*='web_ui__Text__bold']") ||
-        item;
-      const value = cleanAttributeValue(cleanTextFromElement(valueElement), testKey ? "" : label);
-      if (value) attributes[key] = value;
+      const value = key === "colour"
+        ? cleanColourAttributeValue(item, values, testKey ? "" : label)
+        : cleanAttributeValue(cleanTextFromElement(values[1] ||
+          attributeValueElementFor(item, entry.source) ||
+          item.querySelector(".web_ui__Text__subtitle.web_ui__Text__bold, [class*='web_ui__Text__subtitle'][class*='web_ui__Text__bold']") ||
+          item), testKey ? "" : label);
+      if (!value) continue;
+      if (key === "colour") {
+        attributes[key] = mergeColourAttributeValues(attributes[key], value);
+      } else {
+        attributes[key] = value;
+      }
     }
 
     const cells = Array.from(rootElement.querySelectorAll(".web_ui__Cell__cell.web_ui__Cell__default"));
@@ -305,6 +347,10 @@
       const title = cleanText((cell.querySelector(".web_ui__Cell__title, [class*='web_ui__Cell__title']") || {}).textContent || "");
       const body = cleanText((cell.querySelector(".web_ui__Cell__body, [class*='web_ui__Cell__body']") || {}).textContent || "");
       const titleKey = labelMap[title];
+      if (titleKey === "colour" && body) {
+        attributes[titleKey] = mergeColourAttributeValues(attributes[titleKey], cleanColourAttributeText(body, title));
+        continue;
+      }
       if (titleKey && body && !attributes[titleKey]) {
         attributes[titleKey] = cleanAttributeValue(body, title);
         continue;
@@ -314,9 +360,13 @@
       if (!parts.length) continue;
 
       const key = labelMap[parts[0]];
-      if (key && !attributes[key] && parts.length >= 2) {
-        const value = cleanAttributeValue(parts.slice(1).join(" "), parts[0]);
-        if (value) attributes[key] = value;
+      if (key && (key === "colour" || !attributes[key]) && parts.length >= 2) {
+        const value = key === "colour"
+          ? cleanColourAttributeText(parts.slice(1).join("\n"), parts[0])
+          : cleanAttributeValue(parts.slice(1).join(" "), parts[0]);
+        if (value) {
+          attributes[key] = key === "colour" ? mergeColourAttributeValues(attributes[key], value) : value;
+        }
         continue;
       }
 
@@ -324,11 +374,17 @@
       const compactEntry = Object.entries(labelMap).find(([labelName]) => compareText(compactText).startsWith(compareText(labelName)));
       if (!compactEntry) continue;
       const [labelName, compactKey] = compactEntry;
-      if (attributes[compactKey]) continue;
-      const compactValue = cleanAttributeValue(compactText.slice(labelName.length), labelName);
-      if (compactValue) attributes[compactKey] = compactValue;
+      if (compactKey !== "colour" && attributes[compactKey]) continue;
+      const compactValue = compactKey === "colour"
+        ? cleanColourAttributeText(compactText.slice(labelName.length), labelName)
+        : cleanAttributeValue(compactText.slice(labelName.length), labelName);
+      if (compactValue) {
+        attributes[compactKey] = compactKey === "colour" ? mergeColourAttributeValues(attributes[compactKey], compactValue) : compactValue;
+      }
     }
 
+    mergeStructuredAttributes(attributes, extractLabelledAttributePairs(rootElement, labelMap));
+    mergeItempropAttributes(attributes, extractItempropAttributes(rootElement));
     return attributes;
   }
 
@@ -372,6 +428,360 @@
 
     return Array.from(item.querySelectorAll(".web_ui__Text__subtitle.web_ui__Text__bold, [class*='web_ui__Text__subtitle'][class*='web_ui__Text__bold']"))
       .find((element) => cleanTextFromElement(element)) || null;
+  }
+
+  function extractItempropAttributes(rootElement) {
+    const attributes = {};
+    const colourNodes = Array.from(rootElement.querySelectorAll('[itemprop="color"], [itemprop="colour"]'));
+
+    for (const node of colourNodes) {
+      const value = cleanColourAttributeText(cleanTextFromElement(node), "");
+      if (value) attributes.colour = mergeColourAttributeValues(attributes.colour, value);
+    }
+
+    return attributes;
+  }
+
+  async function waitForDirectColourAttribute() {
+    const startedAt = Date.now();
+    let lastResult = extractDirectColourAttribute(document);
+
+    while (Date.now() - startedAt < 10000) {
+      lastResult = extractDirectColourAttribute(document);
+      if (lastResult.value) {
+        return {
+          ...lastResult,
+          timedOut: false,
+          waitedMs: Date.now() - startedAt
+        };
+      }
+
+      scrollTowardsListingDetails();
+      await delay(150);
+    }
+
+    return {
+      ...lastResult,
+      timedOut: true,
+      waitedMs: Date.now() - startedAt
+    };
+  }
+
+  function extractDirectColourAttribute(rootElement) {
+    const selectors = [
+      '.details-list__item-value[itemprop="color"]',
+      '.details-list__item-value[itemprop="colour"]',
+      '[itemprop="color"]',
+      '[itemprop="colour"]'
+    ];
+    const nodes = Array.from(rootElement.querySelectorAll(selectors.join(",")))
+      .filter((node, index, all) => all.indexOf(node) === index);
+    const rawCandidates = nodes
+      .map((node) => cleanTextFromElement(node))
+      .filter(Boolean);
+    const candidates = rawCandidates
+      .map((text) => cleanColourAttributeText(text, ""))
+      .filter(Boolean);
+
+    let value = "";
+    for (const candidate of candidates) {
+      value = mergeColourAttributeValues(value, candidate);
+    }
+
+    return {
+      value,
+      rawCandidates: rawCandidates.slice(0, 5),
+      candidates: candidates.slice(0, 5),
+      nodeCount: nodes.length
+    };
+  }
+
+  function extractExplicitColourAttribute(rootElement) {
+    const selectors = [
+      '.details-list__item-value[itemprop="color"]',
+      '.details-list__item-value[itemprop="colour"]',
+      '[itemprop="color"] .web_ui__Text__subtitle.web_ui__Text__bold',
+      '[itemprop="colour"] .web_ui__Text__subtitle.web_ui__Text__bold',
+      '[itemprop="color"] [class*="web_ui__Text__subtitle"][class*="web_ui__Text__bold"]',
+      '[itemprop="colour"] [class*="web_ui__Text__subtitle"][class*="web_ui__Text__bold"]',
+      '[itemprop="color"]',
+      '[itemprop="colour"]'
+    ];
+    const nodes = Array.from(rootElement.querySelectorAll(selectors.join(",")))
+      .filter((node, index, all) => all.indexOf(node) === index);
+    const rawCandidates = nodes
+      .map((node) => cleanTextFromElement(node))
+      .filter(Boolean);
+    const candidates = rawCandidates
+      .map((text) => cleanColourAttributeText(text, ""))
+      .filter(Boolean);
+
+    let value = "";
+    for (const candidate of candidates) {
+      value = mergeColourAttributeValues(value, candidate);
+    }
+
+    return {
+      value,
+      rawCandidates: rawCandidates.slice(0, 5),
+      candidates: candidates.slice(0, 5),
+      nodeCount: nodes.length
+    };
+  }
+
+  function cleanColourAttributeValue(item, values, label) {
+    const candidates = [];
+    const valueElements = values.length ? values : Array.from(item.querySelectorAll(".web_ui__Text__subtitle.web_ui__Text__bold, [class*='web_ui__Text__subtitle'][class*='web_ui__Text__bold']"));
+
+    for (const valueElement of valueElements) {
+      candidates.push(cleanAttributeValue(cleanTextFromElement(valueElement), label));
+    }
+
+    const lines = getLines(multilineTextFromElement(item));
+    const labelKey = compareText(label);
+    const valueLines = labelKey && compareText(lines[0]) === labelKey ? lines.slice(1) : lines;
+    candidates.push(...valueLines.map((line) => cleanAttributeValue(line, label)));
+
+    return cleanColourAttributeText(candidates.join("\n"), label);
+  }
+
+  function cleanColourAttributeText(value, label) {
+    const labelKey = compareText(label);
+    const seen = new Set();
+    const output = [];
+
+    for (const line of getLines(value)) {
+      const cleaned = cleanAttributeValue(line, label);
+      const key = compareText(cleaned);
+      if (!cleaned || seen.has(key)) continue;
+      if (labelKey && key === labelKey) continue;
+      if (/^(colour|color|brand|size|condition|material)$/i.test(cleaned)) continue;
+      if (/\b(?:menu|information)$/i.test(cleaned)) continue;
+
+      for (const colour of splitColourAttributeValue(cleaned)) {
+        const colourKey = compareText(colour);
+        if (!colour || seen.has(colourKey)) continue;
+        seen.add(colourKey);
+        output.push(colour);
+      }
+    }
+
+    return output.slice(0, 2).join(", ");
+  }
+
+  function mergeColourAttributeValues(current, next) {
+    const seen = new Set();
+    const output = [];
+
+    for (const value of [current, next]) {
+      for (const colour of splitColourAttributeValue(value)) {
+        const key = compareText(colour);
+        if (!colour || seen.has(key)) continue;
+        seen.add(key);
+        output.push(colour);
+        if (output.length >= 2) return output.join(", ");
+      }
+    }
+
+    return output.join(", ");
+  }
+
+  function splitColourAttributeValue(value) {
+    const seen = new Set();
+    const output = [];
+    const parts = cleanText(value)
+      .split(/\s*(?:,|;|\||\/|\n|\s+(?:and|&)\s+)\s*/g)
+      .map(cleanText)
+      .filter(Boolean);
+
+    for (const part of parts) {
+      const colours = vintedColourLabelsFromText(part);
+      const values = colours.length ? colours : [part];
+      for (const colour of values) {
+        const key = compareText(colour);
+        if (!colour || seen.has(key)) continue;
+        seen.add(key);
+        output.push(colour);
+      }
+    }
+
+    return output;
+  }
+
+  function vintedColourLabelsFromText(value) {
+    const text = cleanText(value).toLowerCase().replace(/\bgray\b/g, "grey");
+    if (!text) return [];
+
+    const colours = [
+      ["Light blue", /\blight blue\b/g],
+      ["Dark green", /\bdark green\b/g],
+      ["Mustard", /\bmustard(?: yellow)?\b/g],
+      ["Yellow", /\byellow\b/g],
+      ["Silver", /\bsilver\b/g],
+      ["Gold", /\bgold\b/g],
+      ["Multi", /\b(multi|multicolou?r|multi coloured|multi color|multi colour)\b/g],
+      ["Clear", /\b(clear|transparent)\b/g],
+      ["Turquoise", /\b(turquoise|teal)\b/g],
+      ["Mint", /\bmint(?: green)?\b/g],
+      ["Green", /\bgreen\b/g],
+      ["Khaki", /\bkhaki(?: green)?\b/g],
+      ["Brown", /\b(brown|tan)\b/g],
+      ["Rose", /\b(rose(?: pink)?|blush)\b/g],
+      ["Purple", /\b(purple|violet)\b/g],
+      ["Lilac", /\b(lilac|lavender)\b/g],
+      ["Blue", /\b(blue|denim)\b/g],
+      ["Navy", /\b(navy(?: blue)?|dark blue)\b/g],
+      ["Apricot", /\bapricot\b/g],
+      ["Orange", /\borange\b/g],
+      ["Coral", /\bcoral(?: orange)?\b/g],
+      ["Red", /\bred\b/g],
+      ["Burgundy", /\b(burgundy(?: red)?|maroon)\b/g],
+      ["Pink", /\bpink\b/g],
+      ["Black", /\bblack\b/g],
+      ["Grey", /\bgrey\b/g],
+      ["White", /\bwhite\b/g],
+      ["Cream", /\bcream\b/g],
+      ["Beige", /\b(beige|nude)\b/g]
+    ];
+
+    const matches = [];
+    for (const [label, pattern] of colours) {
+      pattern.lastIndex = 0;
+      for (const match of text.matchAll(pattern)) {
+        matches.push({
+          label,
+          index: match.index || 0,
+          end: (match.index || 0) + match[0].length
+        });
+      }
+    }
+
+    const seen = new Set();
+    const usedRanges = [];
+    return matches
+      .sort((a, b) => a.index - b.index || (b.end - b.index) - (a.end - a.index))
+      .filter((match) => {
+        const overlaps = usedRanges.some((range) => match.index < range.end && match.end > range.index);
+        if (overlaps) return false;
+        usedRanges.push({ index: match.index, end: match.end });
+        return true;
+      })
+      .map((match) => match.label)
+      .filter((label) => {
+        const key = compareText(label);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }
+
+  function extractLabelledAttributePairs(rootElement, labelMap) {
+    const attributes = {};
+    const labelEntries = Object.entries(labelMap);
+    const labelElements = Array.from(rootElement.querySelectorAll("span, div, p, dt, h2, h3"))
+      .filter(isVisibleElement)
+      .map((element) => ({
+        element,
+        label: cleanTextFromElement(element)
+      }))
+      .filter((entry) => labelMap[entry.label]);
+
+    for (const { element, label } of labelElements) {
+      const key = labelMap[label];
+      if (!key || (key !== "colour" && attributes[key])) continue;
+
+      const value = findNearbyAttributeValue(element, labelEntries);
+      if (!value) continue;
+
+      if (key === "colour") {
+        attributes[key] = mergeColourAttributeValues(attributes[key], cleanColourAttributeText(value, label));
+      } else {
+        attributes[key] = cleanAttributeValue(value, label);
+      }
+    }
+
+    return attributes;
+  }
+
+  function findNearbyAttributeValue(labelElement, labelEntries) {
+    const labelledBySibling = findAttributeValueNearLabel(labelElement, labelElement.parentElement, labelEntries);
+    if (labelledBySibling) return labelledBySibling;
+
+    let root = labelElement.parentElement;
+    for (let depth = 0; root && depth < 5; depth += 1, root = root.parentElement) {
+      const value = findAttributeValueNearLabel(labelElement, root, labelEntries);
+      if (value) return value;
+    }
+
+    return "";
+  }
+
+  function findAttributeValueNearLabel(labelElement, root, labelEntries) {
+    if (!root) return "";
+
+    const candidates = Array.from(root.querySelectorAll([
+      ".web_ui__Text__subtitle.web_ui__Text__bold",
+      "[class*='web_ui__Text__subtitle'][class*='web_ui__Text__bold']",
+      ".details-list__item-value",
+      "span",
+      "div",
+      "p"
+    ].join(",")))
+      .filter((element) => element !== labelElement && isVisibleElement(element))
+      .filter((element) => Boolean(labelElement.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING))
+      .map((element) => ({
+        element,
+        text: cleanTextFromElement(element)
+      }))
+      .filter((candidate) => isLikelyAttributeValue(candidate.text, labelEntries))
+      .sort((a, b) => {
+        const boldDelta = Number(isBoldAttributeValue(b.element)) - Number(isBoldAttributeValue(a.element));
+        if (boldDelta) return boldDelta;
+        return elementDistance(labelElement, a.element) - elementDistance(labelElement, b.element);
+      });
+
+    return candidates[0] ? candidates[0].text : "";
+  }
+
+  function isLikelyAttributeValue(value, labelEntries) {
+    const text = cleanText(value);
+    if (!text || text.length > 120) return false;
+    if (labelEntries.some(([label]) => compareText(label) === compareText(text))) return false;
+    if (/^(uploaded|postage|shipping|buy now|make an offer|ask seller)$/i.test(text)) return false;
+    if (/^[£$€]\s?\d/.test(text)) return false;
+    return true;
+  }
+
+  function isBoldAttributeValue(element) {
+    return element.matches(".web_ui__Text__subtitle.web_ui__Text__bold, [class*='web_ui__Text__subtitle'][class*='web_ui__Text__bold'], .details-list__item-value");
+  }
+
+  function elementDistance(from, to) {
+    const fromRect = from.getBoundingClientRect();
+    const toRect = to.getBoundingClientRect();
+    return Math.abs(toRect.top - fromRect.top) + Math.abs(toRect.left - fromRect.left);
+  }
+
+  function mergeStructuredAttributes(attributes, extracted) {
+    for (const [key, value] of Object.entries(extracted)) {
+      if (!value) continue;
+      if (key === "colour") {
+        attributes[key] = mergeColourAttributeValues(attributes[key], value);
+      } else if (!attributes[key]) {
+        attributes[key] = value;
+      }
+    }
+  }
+
+  function mergeItempropAttributes(attributes, extracted) {
+    for (const [key, value] of Object.entries(extracted)) {
+      if (!value) continue;
+      if (key === "colour") {
+        attributes[key] = value;
+      } else if (!attributes[key]) {
+        attributes[key] = value;
+      }
+    }
   }
 
   function multilineTextFromElement(element) {
@@ -826,7 +1236,7 @@
       output = output.slice(label.length).trim();
     }
     return output
-      .replace(/\b(?:Brand menu|Size information|Condition information)\b/gi, "")
+      .replace(/\b(?:Brand menu|Size information|Condition information|Colour information|Color information)\b/gi, "")
       .trim();
   }
 
@@ -986,6 +1396,82 @@
       }
       await delay(100);
     }
+  }
+
+  async function revealListingDetails() {
+    const documentHeight = Math.max(
+      document.documentElement.scrollHeight || 0,
+      document.body.scrollHeight || 0
+    );
+    const positions = [
+      0,
+      Math.min(500, documentHeight),
+      Math.min(1000, documentHeight),
+      Math.floor(documentHeight * 0.4),
+      Math.floor(documentHeight * 0.65)
+    ];
+
+    for (const top of Array.from(new Set(positions)).filter((value) => Number.isFinite(value) && value >= 0)) {
+      window.scrollTo(0, top);
+      await delay(120);
+    }
+    window.scrollTo(0, 0);
+  }
+
+  function scrollTowardsListingDetails() {
+    const documentHeight = Math.max(
+      document.documentElement.scrollHeight || 0,
+      document.body.scrollHeight || 0
+    );
+    const elapsedSlice = Math.floor(Date.now() / 150) % 6;
+    const positions = [
+      0,
+      Math.min(500, documentHeight),
+      Math.min(1000, documentHeight),
+      Math.floor(documentHeight * 0.35),
+      Math.floor(documentHeight * 0.55),
+      Math.floor(documentHeight * 0.75)
+    ];
+    window.scrollTo(0, positions[elapsedSlice] || 0);
+  }
+
+  async function waitForListingAttributes() {
+    const startedAt = Date.now();
+    let lastProbe = listingAttributeProbe();
+
+    while (Date.now() - startedAt < 8000) {
+      lastProbe = listingAttributeProbe();
+      if (lastProbe.hasAttributes) {
+        return {
+          ...lastProbe,
+          timedOut: false,
+          waitedMs: Date.now() - startedAt
+        };
+      }
+      await delay(150);
+    }
+
+    return {
+      ...lastProbe,
+      timedOut: true,
+      waitedMs: Date.now() - startedAt
+    };
+  }
+
+  function listingAttributeProbe() {
+    const itempropColourCount = document.querySelectorAll('[itemprop="color"], [itemprop="colour"]').length;
+    const detailsValueCount = document.querySelectorAll(".details-list__item-value").length;
+    const attributeNodeCount = document.querySelectorAll('[data-testid^="item-attributes-"], .details-list__item').length;
+    const text = document.body ? document.body.innerText || "" : "";
+    const hasColourText = /(?:^|\n)\s*Colou?r\s*(?:\n|$)/i.test(text);
+
+    return {
+      itempropColourCount,
+      detailsValueCount,
+      attributeNodeCount,
+      hasColourText,
+      hasAttributes: itempropColourCount > 0 || detailsValueCount > 0 || attributeNodeCount > 0 || hasColourText
+    };
   }
 
   function delay(ms) {

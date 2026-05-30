@@ -300,7 +300,7 @@
   }
 
   async function fillColourField(value) {
-    const values = splitToggleValues(value);
+    const values = splitColourValues(value);
     if (!values.length) {
       debugFill("colour:empty", { value });
       return false;
@@ -1301,63 +1301,84 @@
     const text = backupText(backup);
     if (!text) return "";
 
-    const labelled = text.match(/\bcolo[u]?r\s*:\s*([a-z ]{3,30})(?:,|\.|£|$)/i);
+    const labelled = text.match(/\bcolo[u]?r\s*:\s*([a-z ,&/]{3,60})(?:\.|£|$)/i);
     if (labelled) {
-      const labelledColour = firstKnownColour(labelled[1]);
-      if (labelledColour) return labelledColour;
+      const labelledColours = knownColourValuesFromText(labelled[1]);
+      if (labelledColours.length) return labelledColours.join(", ");
     }
 
-    return firstKnownColour([
+    return knownColourValuesFromText([
       backup && backup.title,
       backup && backup.cardTitle,
       backup && backup.description
-    ].filter(Boolean).join(" "));
+    ].filter(Boolean).join(" ")).join(", ");
   }
 
-  function firstKnownColour(value) {
+  function knownColourValuesFromText(value) {
     const text = normalizeColour(value);
-    if (!text) return "";
+    if (!text) return [];
 
     const colours = [
-      ["multicolour", /\b(multicolour|multicolor|multi coloured|multi colored|multi colour|multi color|multi)\b/],
-      ["black", /\bblack\b/],
-      ["white", /\bwhite\b/],
-      ["grey", /\b(grey|gray)\b/],
-      ["beige", /\bbeige\b/],
-      ["cream", /\bcream\b/],
-      ["brown", /\b(brown|tan)\b/],
-      ["red", /\b(red|burgundy|maroon)\b/],
-      ["pink", /\bpink\b/],
-      ["purple", /\b(purple|violet|lilac)\b/],
-      ["blue", /\b(blue|navy|denim)\b/],
-      ["green", /\bgreen\b/],
-      ["yellow", /\byellow\b/],
-      ["orange", /\borange\b/],
-      ["gold", /\bgold\b/],
-      ["silver", /\bsilver\b/]
+      ["Light blue", /\blight blue\b/g],
+      ["Dark green", /\bdark green\b/g],
+      ["Mustard", /\bmustard(?: yellow)?\b/g],
+      ["Yellow", /\byellow\b/g],
+      ["Silver", /\bsilver\b/g],
+      ["Gold", /\bgold\b/g],
+      ["Multi", /\bmulticolour\b/g],
+      ["Clear", /\b(clear|transparent)\b/g],
+      ["Turquoise", /\b(turquoise|teal)\b/g],
+      ["Mint", /\bmint(?: green)?\b/g],
+      ["Green", /\bgreen\b/g],
+      ["Khaki", /\bkhaki(?: green)?\b/g],
+      ["Brown", /\b(brown|tan)\b/g],
+      ["Rose", /\b(rose(?: pink)?|blush)\b/g],
+      ["Purple", /\b(purple|violet)\b/g],
+      ["Lilac", /\b(lilac|lavender)\b/g],
+      ["Blue", /\b(blue|denim)\b/g],
+      ["Navy", /\b(navy(?: blue)?|dark blue)\b/g],
+      ["Apricot", /\bapricot\b/g],
+      ["Orange", /\borange\b/g],
+      ["Coral", /\bcoral(?: orange)?\b/g],
+      ["Red", /\bred\b/g],
+      ["Burgundy", /\b(burgundy(?: red)?|maroon)\b/g],
+      ["Pink", /\bpink\b/g],
+      ["Black", /\bblack\b/g],
+      ["Grey", /\bgrey\b/g],
+      ["White", /\bwhite\b/g],
+      ["Cream", /\bcream\b/g],
+      ["Beige", /\b(beige|nude)\b/g]
     ];
 
-    const match = colours.find(([, pattern]) => pattern.test(text));
-    if (!match) return "";
+    const matches = [];
+    for (const [label, pattern] of colours) {
+      pattern.lastIndex = 0;
+      for (const match of text.matchAll(pattern)) {
+        matches.push({
+          label,
+          index: match.index || 0,
+          end: (match.index || 0) + match[0].length
+        });
+      }
+    }
 
-    return {
-      multicolour: "Multicolour",
-      black: "Black",
-      white: "White",
-      grey: "Grey",
-      beige: "Beige",
-      cream: "Cream",
-      brown: "Brown",
-      red: "Red",
-      pink: "Pink",
-      purple: "Purple",
-      blue: "Blue",
-      green: "Green",
-      yellow: "Yellow",
-      orange: "Orange",
-      gold: "Gold",
-      silver: "Silver"
-    }[match[0]] || "";
+    const seen = new Set();
+    const usedRanges = [];
+    return matches
+      .sort((a, b) => a.index - b.index || (b.end - b.index) - (a.end - a.index))
+      .filter((match) => {
+        const overlaps = usedRanges.some((range) => match.index < range.end && match.end > range.index);
+        if (overlaps) return false;
+        usedRanges.push({ index: match.index, end: match.end });
+        return true;
+      })
+      .map((match) => match.label)
+      .filter((label) => {
+        const key = normalizeColour(label);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   }
 
   function backupText(backup) {
@@ -1446,7 +1467,7 @@
   }
 
   function colourAliases(value) {
-    const rawValues = splitToggleValues(value);
+    const rawValues = splitColourValues(value);
     const output = rawValues.length ? rawValues : [String(value || "")];
 
     for (const rawValue of output.slice()) {
@@ -1454,15 +1475,16 @@
       const aliases = {
         grey: ["Gray"],
         multicolour: ["Multi", "Multicolor", "Multicolored", "Multicoloured", "Multi colour", "Multi color"],
-        beige: ["Cream", "Nude"],
-        cream: ["Beige"],
-        navy: ["Dark blue", "Blue"],
-        burgundy: ["Red", "Maroon"],
-        maroon: ["Red", "Burgundy"],
-        turquoise: ["Blue", "Green"],
-        teal: ["Blue", "Green"],
-        gold: ["Yellow"],
-        silver: ["Grey", "Gray"]
+        clear: ["Transparent"],
+        beige: ["Nude"],
+        brown: ["Tan"],
+        navy: ["Dark blue"],
+        burgundy: ["Maroon"],
+        purple: ["Violet"],
+        lilac: ["Lavender"],
+        rose: ["Blush"],
+        turquoise: ["Teal"],
+        blue: ["Denim"]
       }[normalized] || [];
       output.push(...aliases);
     }
@@ -1993,6 +2015,17 @@
       .split(/\s*(?:,|;|\||\/|\n)\s*/g)
       .map(cleanText)
       .filter(Boolean);
+  }
+
+  function splitColourValues(value) {
+    const values = String(value || "")
+      .split(/\s*(?:,|;|\||\/|\n|\s+(?:and|&)\s+)\s*/g)
+      .map(cleanText)
+      .filter(Boolean);
+    if (values.length > 1) return values;
+
+    const knownColours = knownColourValuesFromText(value);
+    return knownColours.length > 1 ? knownColours : values;
   }
 
   function closeOpenPicker() {

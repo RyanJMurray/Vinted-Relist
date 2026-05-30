@@ -210,6 +210,7 @@ function createInitialBackup(context) {
       currency: ""
     },
     attributes: {},
+    extractDebug: null,
     images: [],
     status: "started",
     warnings: [],
@@ -232,6 +233,7 @@ function mergeExtractedData(backup, data) {
       ...backup.attributes,
       ...(data.attributes || {})
     },
+    extractDebug: data.extractDebug || backup.extractDebug,
     images: Array.isArray(data.images) ? data.images.map((image, index) => ({
       index,
       originalUrl: image.originalUrl || image.url || "",
