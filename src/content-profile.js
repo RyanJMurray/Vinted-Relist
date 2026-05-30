@@ -97,12 +97,15 @@
       const confirmed = await showConfirmation();
       if (!confirmed) return;
 
+      const workflowId = createWorkflowId(itemId);
+      button.dataset.vraWorkflowId = workflowId;
       setButtonBusy(button, true);
-      activeButtons.set(itemId, button);
+      activeButtons.set(workflowId, button);
 
       chrome.runtime.sendMessage(
         {
           type: "START_RELIST",
+          workflowId,
           itemId,
           itemUrl,
           cardTitle
@@ -111,14 +114,14 @@
           const error = chrome.runtime.lastError;
           if (error) {
             setButtonBusy(button, false);
-            activeButtons.delete(itemId);
+            clearButtonWorkflow(button, workflowId);
             showToast(`Could not start relist: ${error.message}`, "error");
             return;
           }
 
           if (!response || !response.ok) {
             setButtonBusy(button, false);
-            activeButtons.delete(itemId);
+            clearButtonWorkflow(button, workflowId);
             showToast(response && response.error ? response.error : "Could not start relist.", "error");
           }
         }
@@ -206,13 +209,34 @@
       showToast(message.message, message.kind || kindFromStatus(message.status));
     }
 
-    if (!message.itemId) return;
-    const button = activeButtons.get(message.itemId) || document.querySelector(`[${BUTTON_ATTR}][data-vra-item-id="${cssEscape(message.itemId)}"]`);
+    const button = findWorkflowButton(message);
     if (!button) return;
 
     if (message.status === "form_filled" || message.status === "failed") {
       setButtonBusy(button, false);
-      activeButtons.delete(message.itemId);
+      clearButtonWorkflow(button, message.workflowId || message.backupId);
+    }
+  }
+
+  function findWorkflowButton(message) {
+    const workflowId = message.workflowId || message.backupId || "";
+    if (workflowId && activeButtons.has(workflowId)) {
+      return activeButtons.get(workflowId);
+    }
+
+    if (workflowId) {
+      const workflowButton = document.querySelector(`[${BUTTON_ATTR}][data-vra-workflow-id="${cssEscape(workflowId)}"]`);
+      if (workflowButton) return workflowButton;
+    }
+
+    if (!message.itemId) return null;
+    return document.querySelector(`[${BUTTON_ATTR}][data-vra-item-id="${cssEscape(message.itemId)}"]`);
+  }
+
+  function clearButtonWorkflow(button, workflowId) {
+    if (workflowId) activeButtons.delete(workflowId);
+    if (button && button.dataset.vraWorkflowId === workflowId) {
+      delete button.dataset.vraWorkflowId;
     }
   }
 
@@ -256,6 +280,11 @@
   function getElementText(element) {
     if (element instanceof HTMLInputElement) return element.value || element.getAttribute("aria-label") || "";
     return element.textContent || element.getAttribute("aria-label") || element.getAttribute("title") || "";
+  }
+
+  function createWorkflowId(itemId) {
+    const randomPart = Math.random().toString(36).slice(2, 8);
+    return `vra-${itemId}-${Date.now()}-${randomPart}`;
   }
 
   function cssEscape(value) {

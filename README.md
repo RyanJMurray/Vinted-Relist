@@ -17,11 +17,11 @@ Plain Manifest V3 Chrome/Edge extension for cloning your own Vinted UK listings 
 - Saves listing metadata in `chrome.storage.local`.
 - Saves image blobs in extension IndexedDB for 24 hours.
 - Opens `https://www.vinted.co.uk/items/new`, fills what it can, uploads cached images, and stops for manual review.
+- Supports multiple manually started relists running in parallel.
 
 ## Intentional limits
 
 - Does not delete the old listing.
 - Does not submit the new listing.
 - Does not bypass login, captcha, security checks, or rate limits.
-- Does not bulk relist.
 - Stops if any extracted image cannot be cached.

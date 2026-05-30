@@ -3,14 +3,13 @@
 const SELL_URL = "https://www.vinted.co.uk/items/new";
 const BACKUP_PREFIX = "vra_backup_";
 const BACKUP_INDEX_KEY = "vra_backup_index";
-const ACTIVE_WORKFLOW_KEY = "vra_active_workflow";
 const RETENTION_MS = 24 * 60 * 60 * 1000;
-const LOCK_TTL_MS = 30 * 60 * 1000;
 const DB_NAME = "vinted-relist-assistant";
 const DB_VERSION = 1;
 const IMAGE_STORE = "images";
 
-let activeRun = null;
+const activeRuns = new Map();
+let backupIndexWrite = Promise.resolve();
 
 chrome.runtime.onInstalled.addListener(() => {
   cleanupExpiredBackups().catch(() => {});
@@ -47,11 +46,13 @@ async function startRelistWorkflow(message, sender) {
   const originTabId = sender && sender.tab && sender.tab.id;
   const itemId = String(message.itemId || "").trim();
   const itemUrl = String(message.itemUrl || "").trim();
+  const workflowId = cleanWorkflowId(message.workflowId) || createWorkflowId(itemId || "unknown");
 
   if (!originTabId || !itemId || !itemUrl) {
     await safeNotify(originTabId, {
       type: "WORKFLOW_STATUS",
       status: "failed",
+      workflowId,
       itemId,
       kind: "error",
       message: "Cloning failed because the item ID or listing URL could not be read."
@@ -59,50 +60,33 @@ async function startRelistWorkflow(message, sender) {
     return;
   }
 
-  if (activeRun) {
-    await safeNotify(originTabId, {
-      type: "WORKFLOW_STATUS",
-      status: "failed",
-      itemId,
-      kind: "error",
-      message: "A relist workflow is already in progress. Please wait for it to finish."
-    });
-    return;
-  }
-
-  activeRun = runWorkflow({ itemId, itemUrl, cardTitle: message.cardTitle || "", originTabId })
+  const context = { workflowId, itemId, itemUrl, cardTitle: message.cardTitle || "", originTabId };
+  const run = runWorkflow(context)
     .catch(() => {})
     .finally(() => {
-      activeRun = null;
+      activeRuns.delete(workflowId);
     });
 
-  await activeRun;
+  activeRuns.set(workflowId, {
+    itemId,
+    originTabId,
+    startedAt: new Date().toISOString(),
+    run
+  });
+
+  await run;
 }
 
 async function runWorkflow(context) {
   let backup = null;
   let tempTabId = null;
   let sellTabId = null;
-  let ownsLock = false;
 
   try {
     await cleanupExpiredBackups();
-    const lock = await getActiveLock();
-    if (lock) {
-      await safeNotify(context.originTabId, {
-        type: "WORKFLOW_STATUS",
-        status: "failed",
-        itemId: context.itemId,
-        kind: "error",
-        message: "A relist workflow is already in progress. Please wait for it to finish."
-      });
-      return;
-    }
 
     backup = createInitialBackup(context);
     await saveBackup(backup);
-    await setActiveLock({ backupId: backup.id, itemId: context.itemId, startedAt: new Date().toISOString() });
-    ownsLock = true;
     await notifyStatus(context.originTabId, backup, "started", "Started cloning this listing.");
 
     const tempTab = await tabsCreate({ url: context.itemUrl, active: false, openerTabId: context.originTabId });
@@ -186,6 +170,7 @@ async function runWorkflow(context) {
     await safeNotify(context.originTabId, {
       type: "WORKFLOW_STATUS",
       status: "failed",
+      workflowId: context.workflowId,
       itemId: context.itemId,
       backupId: backup && backup.id,
       kind: "error",
@@ -195,6 +180,7 @@ async function runWorkflow(context) {
       await safeNotify(sellTabId, {
         type: "WORKFLOW_STATUS",
         status: "failed",
+        workflowId: context.workflowId,
         itemId: context.itemId,
         backupId: backup && backup.id,
         kind: "error",
@@ -203,7 +189,6 @@ async function runWorkflow(context) {
     }
   } finally {
     if (tempTabId) await closeTabIfOpen(tempTabId);
-    if (ownsLock) await clearActiveLock();
   }
 }
 
@@ -211,7 +196,8 @@ function createInitialBackup(context) {
   const now = Date.now();
   const createdAt = new Date(now).toISOString();
   return {
-    id: `vra-${context.itemId}-${now}`,
+    id: context.workflowId || `vra-${context.itemId}-${now}`,
+    workflowId: context.workflowId,
     itemId: context.itemId,
     sourceUrl: context.itemUrl,
     cardTitle: context.cardTitle || "",
@@ -352,6 +338,7 @@ async function getImageDataUrlsForBackup(backup) {
 function publicBackupForFill(backup) {
   return {
     id: backup.id,
+    workflowId: backup.workflowId || backup.id,
     itemId: backup.itemId,
     sourceUrl: backup.sourceUrl,
     cardTitle: backup.cardTitle,
@@ -396,6 +383,7 @@ async function notifyStatus(tabId, backup, status, message, kind) {
   await safeNotify(tabId, {
     type: "WORKFLOW_STATUS",
     status,
+    workflowId: backup.workflowId || backup.id,
     itemId: backup.itemId,
     backupId: backup.id,
     kind: kind || "info",
@@ -424,9 +412,16 @@ async function getBackups() {
 
 async function saveBackup(backup) {
   await storageSet({ [`${BACKUP_PREFIX}${backup.id}`]: backup });
+  backupIndexWrite = backupIndexWrite
+    .catch(() => {})
+    .then(() => addBackupToIndex(backup.id));
+  await backupIndexWrite;
+}
+
+async function addBackupToIndex(backupId) {
   const current = await storageGet(BACKUP_INDEX_KEY);
   const index = Array.isArray(current[BACKUP_INDEX_KEY]) ? current[BACKUP_INDEX_KEY] : [];
-  const nextIndex = [backup.id].concat(index.filter((id) => id !== backup.id)).slice(0, 30);
+  const nextIndex = [backupId].concat(index.filter((id) => id !== backupId)).slice(0, 30);
   await storageSet({ [BACKUP_INDEX_KEY]: nextIndex });
 }
 
@@ -458,31 +453,19 @@ async function cleanupExpiredBackups() {
   await deleteExpiredImageRecords(now, expiredBackupIds);
 }
 
-async function getActiveLock() {
-  const result = await storageGet(ACTIVE_WORKFLOW_KEY);
-  const lock = result[ACTIVE_WORKFLOW_KEY];
-  if (!lock) return null;
-
-  const startedAt = Date.parse(lock.startedAt || "");
-  if (!Number.isFinite(startedAt) || Date.now() - startedAt > LOCK_TTL_MS) {
-    await clearActiveLock();
-    return null;
-  }
-
-  return lock;
-}
-
-function setActiveLock(lock) {
-  return storageSet({ [ACTIVE_WORKFLOW_KEY]: lock });
-}
-
-function clearActiveLock() {
-  return storageRemove(ACTIVE_WORKFLOW_KEY);
-}
-
 function normalizeMessages(messages) {
   if (!Array.isArray(messages)) return [];
   return messages.map((message) => String(message || "").trim()).filter(Boolean);
+}
+
+function createWorkflowId(itemId) {
+  const randomPart = Math.random().toString(36).slice(2, 8);
+  return `vra-${itemId}-${Date.now()}-${randomPart}`;
+}
+
+function cleanWorkflowId(value) {
+  const text = String(value || "").trim();
+  return text && /^[a-z0-9_-]+$/i.test(text) ? text : "";
 }
 
 function storageGet(keys) {
