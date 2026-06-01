@@ -27,6 +27,56 @@
   cursor: default;
 }
 
+.vra-selectable-card {
+  position: relative;
+}
+
+.vra-select-toggle {
+  align-items: center;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.94);
+  border: 2px solid #0b6b5f;
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(17, 24, 39, 0.18);
+  cursor: pointer;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 24px;
+  z-index: 8;
+}
+
+.vra-select-toggle::after {
+  background: transparent;
+  border-radius: 999px;
+  content: "";
+  display: block;
+  height: 12px;
+  width: 12px;
+}
+
+.vra-select-toggle:hover {
+  background: #e9f6f3;
+}
+
+.vra-select-toggle[aria-pressed="true"] {
+  background: #0b6b5f;
+  border-color: #ffffff;
+}
+
+.vra-select-toggle[aria-pressed="true"]::after {
+  background: #ffffff;
+}
+
+.vra-card-selected {
+  outline: 2px solid #0b6b5f;
+  outline-offset: 2px;
+}
+
 .vra-button-wrap {
   display: flex;
   flex: 0 0 100%;

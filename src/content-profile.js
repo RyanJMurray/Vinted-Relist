@@ -2,6 +2,7 @@
   "use strict";
 
   const BUTTON_ATTR = "data-vra-relist-button";
+  const SELECT_ATTR = "data-vra-select-button";
   const LINK_SELECTOR = [
     'a.new-item-box__overlay[href^="/items/"]',
     'a[data-testid^="product-item-id-"][href*="/items/"]'
@@ -20,6 +21,7 @@
   };
 
   const activeButtons = new Map();
+  const selectedItems = new Map();
   let scanTimer = null;
   let observer = null;
 
@@ -58,13 +60,17 @@
       if (!href) continue;
 
       const itemUrl = new URL(href, window.location.origin).toString();
+      const cardTitle = link.getAttribute("title") || "";
       const card = findParentItemCard(link);
-      if (!card || card.querySelector(`[${BUTTON_ATTR}]`)) continue;
+      if (!card) continue;
+
+      ensureSelectionToggle(card, itemId, itemUrl, cardTitle);
+      if (card.querySelector(`[${BUTTON_ATTR}]`)) continue;
 
       const bumpControl = findBumpControl(card);
       if (!bumpControl) continue;
 
-      const button = createRelistButton(itemId, itemUrl, link.getAttribute("title") || "");
+      const button = createRelistButton(itemId, itemUrl, cardTitle);
       insertButtonNearBumpButton(bumpControl, button);
     }
   }
@@ -94,6 +100,75 @@
     return controls.find((control) => isVisible(control) && getElementText(control).trim().toLowerCase() === "bump") || null;
   }
 
+  function ensureSelectionToggle(card, itemId, itemUrl, cardTitle) {
+    if (card.querySelector(`[${SELECT_ATTR}]`)) return;
+
+    card.classList.add("vra-selectable-card");
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "vra-select-toggle";
+    button.textContent = "";
+    button.setAttribute(SELECT_ATTR, "true");
+    button.setAttribute("aria-label", "Select listing for batch relist");
+    button.setAttribute("aria-pressed", "false");
+    button.dataset.vraItemId = itemId;
+    button.dataset.vraItemUrl = itemUrl;
+    button.dataset.vraCardTitle = cardTitle || "";
+    if (selectedItems.has(itemId)) {
+      button.setAttribute("aria-pressed", "true");
+      card.classList.add("vra-card-selected");
+    }
+
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleSelectedItem(card, button);
+    });
+
+    const overlay = card.querySelector(LINK_SELECTOR);
+    const anchorRoot = overlay && overlay.parentElement ? overlay.parentElement : card;
+    anchorRoot.appendChild(button);
+  }
+
+  function toggleSelectedItem(card, button) {
+    const itemId = button.dataset.vraItemId || "";
+    if (!itemId) return;
+
+    if (selectedItems.has(itemId)) {
+      selectedItems.delete(itemId);
+      button.setAttribute("aria-pressed", "false");
+      card.classList.remove("vra-card-selected");
+      return;
+    }
+
+    selectedItems.set(itemId, {
+      itemId,
+      itemUrl: button.dataset.vraItemUrl || "",
+      cardTitle: button.dataset.vraCardTitle || ""
+    });
+    button.setAttribute("aria-pressed", "true");
+    card.classList.add("vra-card-selected");
+  }
+
+  function selectedRelistItems() {
+    return Array.from(selectedItems.values())
+      .map((item) => {
+        const button = document.querySelector(`[${BUTTON_ATTR}][data-vra-item-id="${cssEscape(item.itemId)}"]`);
+        return button && !button.disabled ? { ...item, button } : null;
+      })
+      .filter(Boolean);
+  }
+
+  function clearSelectedItems() {
+    selectedItems.clear();
+    for (const button of document.querySelectorAll(`[${SELECT_ATTR}]`)) {
+      button.setAttribute("aria-pressed", "false");
+    }
+    for (const card of document.querySelectorAll(".vra-card-selected")) {
+      card.classList.remove("vra-card-selected");
+    }
+  }
+
   function createRelistButton(itemId, itemUrl, cardTitle) {
     const button = document.createElement("button");
     button.type = "button";
@@ -102,6 +177,7 @@
     button.setAttribute(BUTTON_ATTR, "true");
     button.dataset.vraItemId = itemId;
     button.dataset.vraItemUrl = itemUrl;
+    button.dataset.vraCardTitle = cardTitle;
 
     button.addEventListener("click", async (event) => {
       event.preventDefault();
@@ -112,42 +188,68 @@
         return;
       }
 
-      const confirmed = await showConfirmation();
-      if (!confirmed) return;
-
-      const workflowId = createWorkflowId(itemId);
-      button.dataset.vraWorkflowId = workflowId;
-      delete button.dataset.vraDraftTabId;
-      setButtonStatus(button, "started");
-      activeButtons.set(workflowId, button);
-
-      chrome.runtime.sendMessage(
-        {
-          type: "START_RELIST",
-          workflowId,
-          itemId,
-          itemUrl,
-          cardTitle
-        },
-        (response) => {
-          const error = chrome.runtime.lastError;
-          if (error) {
-            setButtonStatus(button, "failed");
-            clearButtonWorkflow(button, workflowId);
-            showToast(`Could not start relist: ${error.message}`, "error");
-            return;
-          }
-
-          if (!response || !response.ok) {
-            setButtonStatus(button, "failed");
-            clearButtonWorkflow(button, workflowId);
-            showToast(response && response.error ? response.error : "Could not start relist.", "error");
-          }
-        }
-      );
+      await handleRelistClick(button);
     });
 
     return button;
+  }
+
+  async function handleRelistClick(clickedButton) {
+    const selected = selectedRelistItems();
+    if (selected.length >= 2) {
+      const confirmed = await showConfirmation(selected.length);
+      if (!confirmed) return;
+
+      for (const item of selected) {
+        startRelistFromButton(item.button);
+      }
+      clearSelectedItems();
+      showToast(`Started cloning ${selected.length} selected listings.`, "info");
+      return;
+    }
+
+    const confirmed = await showConfirmation(1);
+    if (!confirmed) return;
+    startRelistFromButton(clickedButton);
+  }
+
+  function startRelistFromButton(button) {
+    if (!button || button.disabled) return;
+
+    const itemId = button.dataset.vraItemId || "";
+    const itemUrl = button.dataset.vraItemUrl || "";
+    const cardTitle = button.dataset.vraCardTitle || "";
+    const workflowId = createWorkflowId(itemId);
+
+    button.dataset.vraWorkflowId = workflowId;
+    delete button.dataset.vraDraftTabId;
+    setButtonStatus(button, "started");
+    activeButtons.set(workflowId, button);
+
+    chrome.runtime.sendMessage(
+      {
+        type: "START_RELIST",
+        workflowId,
+        itemId,
+        itemUrl,
+        cardTitle
+      },
+      (response) => {
+        const error = chrome.runtime.lastError;
+        if (error) {
+          setButtonStatus(button, "failed");
+          clearButtonWorkflow(button, workflowId);
+          showToast(`Could not start relist: ${error.message}`, "error");
+          return;
+        }
+
+        if (!response || !response.ok) {
+          setButtonStatus(button, "failed");
+          clearButtonWorkflow(button, workflowId);
+          showToast(response && response.error ? response.error : "Could not start relist.", "error");
+        }
+      }
+    );
   }
 
   function openDraftFromButton(button) {
@@ -271,17 +373,19 @@
     button.style.lineHeight = style.lineHeight;
   }
 
-  function showConfirmation() {
+  function showConfirmation(count) {
     return new Promise((resolve) => {
+      const itemCount = Number.isFinite(count) && count > 1 ? Math.floor(count) : 1;
+      const isBatch = itemCount > 1;
       const backdrop = document.createElement("div");
       backdrop.className = "vra-modal-backdrop";
       backdrop.innerHTML = [
         '<div class="vra-modal" role="dialog" aria-modal="true" aria-labelledby="vra-modal-title">',
-        '  <h2 id="vra-modal-title">Clone this listing?</h2>',
-        "  <p>This will clone this listing into a new Vinted listing form. It will save a local backup first. It will not delete or submit anything automatically.</p>",
+        `  <h2 id="vra-modal-title">${isBatch ? `Clone ${itemCount} selected listings?` : "Clone this listing?"}</h2>`,
+        `  <p>${isBatch ? `This will clone ${itemCount} selected listings into separate Vinted draft forms.` : "This will clone this listing into a new Vinted listing form."} It will save a local backup first. It will not delete or submit anything automatically.</p>`,
         '  <div class="vra-modal-actions">',
         '    <button type="button" data-vra-cancel>Cancel</button>',
-        '    <button type="button" data-vra-confirm>Clone listing</button>',
+        `    <button type="button" data-vra-confirm>${isBatch ? `Clone ${itemCount} listings` : "Clone listing"}</button>`,
         "  </div>",
         "</div>"
       ].join("");
