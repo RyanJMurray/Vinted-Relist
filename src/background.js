@@ -24,6 +24,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message.type === "OPEN_DRAFT_TAB") {
+    openDraftTab(message)
+      .then(() => sendResponse({ ok: true }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (message.type === "DELETE_LISTING") {
+    startDeleteListingWorkflow(message, sender).catch(() => {});
+    sendResponse({ ok: true });
+    return false;
+  }
+
   if (message.type === "GET_BACKUPS") {
     getBackups()
       .then((backups) => sendResponse({ ok: true, backups }))
@@ -119,18 +132,19 @@ async function runWorkflow(context) {
     await closeTabIfOpen(tempTabId);
     tempTabId = null;
 
-    const sellTab = await tabsCreate({ url: SELL_URL, active: true, openerTabId: context.originTabId });
+    const sellTab = await tabsCreate({ url: SELL_URL, active: false, openerTabId: context.originTabId });
     sellTabId = sellTab.id;
+    backup.draftTabId = sellTabId;
     backup.status = "sell_page_opened";
     await saveBackup(backup);
-    await notifyStatus(context.originTabId, backup, "sell_page_opened", "Opened the new listing form.");
+    await notifyStatus(context.originTabId, backup, "sell_page_opened", "Opened the new listing form in the background.");
 
     await waitForTabComplete(sellTabId, 45000);
     await delay(250);
     await executeScriptFile(sellTabId, "src/fill-form.js");
 
     const imageDataUrls = await getImageDataUrlsForBackup(backup);
-    const fillResponse = await sendTabMessage(sellTabId, {
+    const fillResponse = await sendFillMessageWithRetry(sellTabId, {
       type: "FILL_FROM_BACKUP",
       backup: publicBackupForFill(backup),
       imageDataUrls
@@ -152,7 +166,7 @@ async function runWorkflow(context) {
 
     backup.status = "form_filled";
     await saveBackup(backup);
-    await notifyStatus(context.originTabId, backup, "form_filled", "Listing cloned and checked in the new form. Please review it manually before posting.", "success");
+    await notifyStatus(context.originTabId, backup, "form_filled", "Draft is ready. Click Review to check it before posting.", "success");
     await notifyStatus(sellTabId, backup, "form_filled", "Listing cloned and checked in the new form. Please review the details and images manually before posting.", "success");
   } catch (error) {
     if (backup) {
@@ -192,6 +206,78 @@ async function runWorkflow(context) {
   }
 }
 
+async function openDraftTab(message) {
+  const tabId = Number(message && message.tabId);
+  if (!Number.isInteger(tabId) || tabId <= 0) {
+    throw new Error("The draft tab could not be found.");
+  }
+
+  const tab = await tabsGet(tabId);
+  if (!tab || typeof tab.windowId !== "number") {
+    throw new Error("The draft tab is no longer open.");
+  }
+
+  await windowsUpdate(tab.windowId, { focused: true });
+  await tabsUpdate(tabId, { active: true });
+}
+
+async function startDeleteListingWorkflow(message, sender) {
+  const originTabId = sender && sender.tab && sender.tab.id;
+  const itemId = String(message.itemId || "").trim();
+  const itemUrl = String(message.itemUrl || "").trim();
+  let deleteTabId = null;
+
+  if (!originTabId || !itemId || !itemUrl) {
+    await safeNotify(originTabId, {
+      type: "DELETE_STATUS",
+      status: "delete_failed",
+      itemId,
+      kind: "error",
+      message: "Delete failed because the listing URL could not be read."
+    });
+    return;
+  }
+
+  try {
+    await safeNotify(originTabId, {
+      type: "DELETE_STATUS",
+      status: "delete_started",
+      itemId,
+      kind: "info",
+      message: "Opening listing to delete it."
+    });
+
+    const deleteTab = await tabsCreate({ url: itemUrl, active: false, openerTabId: originTabId });
+    deleteTabId = deleteTab.id;
+    await waitForTabComplete(deleteTabId, 30000);
+    await delay(250);
+
+    const results = await executeScriptFile(deleteTabId, "src/delete-listing.js");
+    const result = results && results[0] ? results[0].result : null;
+    if (!result || !result.ok) {
+      throw new WorkflowError("delete_listing", result && result.error ? result.error : "Could not delete the listing.");
+    }
+
+    await safeNotify(originTabId, {
+      type: "DELETE_STATUS",
+      status: "deleted",
+      itemId,
+      kind: "success",
+      message: "Original listing deleted."
+    });
+  } catch (error) {
+    await safeNotify(originTabId, {
+      type: "DELETE_STATUS",
+      status: "delete_failed",
+      itemId,
+      kind: "error",
+      message: `Delete failed. ${error && error.message ? error.message : String(error)}`
+    });
+  } finally {
+    if (deleteTabId) await closeTabIfOpen(deleteTabId);
+  }
+}
+
 function createInitialBackup(context) {
   const now = Date.now();
   const createdAt = new Date(now).toISOString();
@@ -212,6 +298,7 @@ function createInitialBackup(context) {
     attributes: {},
     extractDebug: null,
     images: [],
+    draftTabId: null,
     status: "started",
     warnings: [],
     errors: []
@@ -254,6 +341,30 @@ function validateExtractedBackup(backup) {
 async function executeExtractor(tabId) {
   const results = await executeScriptFile(tabId, "src/extract-listing.js");
   return results && results[0] ? results[0].result : null;
+}
+
+async function sendFillMessageWithRetry(tabId, payload) {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      return await sendTabMessage(tabId, payload);
+    } catch (error) {
+      lastError = error;
+      if (!isTransientMessageError(error) || attempt === 3) break;
+
+      await delay(350 * attempt);
+      await waitForTabComplete(tabId, 15000).catch(() => {});
+      await executeScriptFile(tabId, "src/fill-form.js").catch(() => {});
+    }
+  }
+
+  throw lastError || new Error("Could not fill the new listing form.");
+}
+
+function isTransientMessageError(error) {
+  const message = error && error.message ? error.message : String(error || "");
+  return /message channel closed|receiving end does not exist|could not establish connection|extension context invalidated/i.test(message);
 }
 
 async function cacheImagesForBackup(backup) {
@@ -388,6 +499,7 @@ async function notifyStatus(tabId, backup, status, message, kind) {
     workflowId: backup.workflowId || backup.id,
     itemId: backup.itemId,
     backupId: backup.id,
+    draftTabId: backup.draftTabId || null,
     kind: kind || "info",
     message
   });
@@ -506,6 +618,36 @@ function tabsCreate(createProperties) {
       const error = chrome.runtime.lastError;
       if (error) reject(new Error(error.message));
       else resolve(tab);
+    });
+  });
+}
+
+function tabsGet(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.get(tabId, (tab) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(tab);
+    });
+  });
+}
+
+function tabsUpdate(tabId, updateProperties) {
+  return new Promise((resolve, reject) => {
+    chrome.tabs.update(tabId, updateProperties, (tab) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(tab);
+    });
+  });
+}
+
+function windowsUpdate(windowId, updateProperties) {
+  return new Promise((resolve, reject) => {
+    chrome.windows.update(windowId, updateProperties, (windowInfo) => {
+      const error = chrome.runtime.lastError;
+      if (error) reject(new Error(error.message));
+      else resolve(windowInfo);
     });
   });
 }

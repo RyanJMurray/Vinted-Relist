@@ -7,8 +7,17 @@
     'a[data-testid^="product-item-id-"][href*="/items/"]'
   ].join(",");
   const BUTTON_LIKE_SELECTOR = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
-  const ACTIVE_TEXT = "Cloning...";
   const DEFAULT_TEXT = "Relist";
+  const READY_TEXT = "Review";
+  const STATUS_LABELS = {
+    started: "Starting Draft...",
+    item_page_opened: "Retrieving Listing Data...",
+    backup_saved: "Saved Backup",
+    images_cached: "Images Cached...",
+    sell_page_opened: "Drafting listing...",
+    form_filled: READY_TEXT,
+    failed: DEFAULT_TEXT
+  };
 
   const activeButtons = new Map();
   let scanTimer = null;
@@ -23,8 +32,12 @@
 
     window.addEventListener("pageshow", scheduleScan);
     chrome.runtime.onMessage.addListener((message) => {
-      if (!message || message.type !== "WORKFLOW_STATUS") return;
-      handleWorkflowStatus(message);
+      if (!message) return;
+      if (message.type === "WORKFLOW_STATUS") {
+        handleWorkflowStatus(message);
+      } else if (message.type === "DELETE_STATUS") {
+        handleDeleteStatus(message);
+      }
     });
   }
 
@@ -94,12 +107,18 @@
       event.preventDefault();
       event.stopPropagation();
 
+      if (button.dataset.vraDraftTabId) {
+        openDraftFromButton(button);
+        return;
+      }
+
       const confirmed = await showConfirmation();
       if (!confirmed) return;
 
       const workflowId = createWorkflowId(itemId);
       button.dataset.vraWorkflowId = workflowId;
-      setButtonBusy(button, true);
+      delete button.dataset.vraDraftTabId;
+      setButtonStatus(button, "started");
       activeButtons.set(workflowId, button);
 
       chrome.runtime.sendMessage(
@@ -113,14 +132,14 @@
         (response) => {
           const error = chrome.runtime.lastError;
           if (error) {
-            setButtonBusy(button, false);
+            setButtonStatus(button, "failed");
             clearButtonWorkflow(button, workflowId);
             showToast(`Could not start relist: ${error.message}`, "error");
             return;
           }
 
           if (!response || !response.ok) {
-            setButtonBusy(button, false);
+            setButtonStatus(button, "failed");
             clearButtonWorkflow(button, workflowId);
             showToast(response && response.error ? response.error : "Could not start relist.", "error");
           }
@@ -131,16 +150,103 @@
     return button;
   }
 
+  function openDraftFromButton(button) {
+    const tabId = Number(button.dataset.vraDraftTabId);
+    if (!Number.isInteger(tabId) || tabId <= 0) {
+      showToast("The draft tab could not be found.", "error");
+      return;
+    }
+
+    chrome.runtime.sendMessage({ type: "OPEN_DRAFT_TAB", tabId }, (response) => {
+      const error = chrome.runtime.lastError;
+      if (error) {
+        showToast(`Could not open draft: ${error.message}`, "error");
+        return;
+      }
+
+      if (!response || !response.ok) {
+        showToast(response && response.error ? response.error : "Could not open draft.", "error");
+      }
+    });
+  }
+
   function insertButtonNearBumpButton(bumpControl, button) {
     matchBumpButtonSize(bumpControl, button);
 
     const wrapper = document.createElement("div");
     wrapper.className = "vra-button-wrap";
+    wrapper.style.setProperty("--vra-bump-width", button.style.getPropertyValue("--vra-bump-width") || "72px");
+    wrapper.style.setProperty("--vra-bump-height", button.style.getPropertyValue("--vra-bump-height") || "32px");
     wrapper.appendChild(button);
+    wrapper.appendChild(createResetButton(button));
+    wrapper.appendChild(createDeleteButton(button));
 
     if (bumpControl.parentElement) {
       bumpControl.insertAdjacentElement("afterend", wrapper);
     }
+  }
+
+  function createResetButton(relistButton) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "vra-reset-button";
+    button.textContent = "↻";
+    button.title = "Reset to relist again";
+    button.setAttribute("aria-label", "Reset to relist again");
+    button.hidden = true;
+
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      resetButtonForRelist(relistButton);
+    });
+
+    return button;
+  }
+
+  function createDeleteButton(relistButton) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "vra-delete-button";
+    button.textContent = "🗑";
+    button.title = "Delete original listing";
+    button.setAttribute("aria-label", "Delete original listing");
+    button.hidden = true;
+
+    button.addEventListener("click", async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const confirmed = await showDeleteConfirmation();
+      if (!confirmed) return;
+
+      button.disabled = true;
+      button.textContent = "...";
+      chrome.runtime.sendMessage(
+        {
+          type: "DELETE_LISTING",
+          itemId: relistButton.dataset.vraItemId,
+          itemUrl: relistButton.dataset.vraItemUrl
+        },
+        (response) => {
+          const error = chrome.runtime.lastError;
+          if (error) {
+            button.disabled = false;
+            button.textContent = "🗑";
+            showToast(`Could not start delete: ${error.message}`, "error");
+            return;
+          }
+
+          if (!response || !response.ok) {
+            button.disabled = false;
+            button.textContent = "🗑";
+            showToast(response && response.error ? response.error : "Could not start delete.", "error");
+          }
+        }
+      );
+    });
+
+    return button;
   }
 
   function matchBumpButtonSize(bumpControl, button) {
@@ -204,6 +310,43 @@
     });
   }
 
+  function showDeleteConfirmation() {
+    return new Promise((resolve) => {
+      const backdrop = document.createElement("div");
+      backdrop.className = "vra-modal-backdrop";
+      backdrop.innerHTML = [
+        '<div class="vra-modal" role="dialog" aria-modal="true" aria-labelledby="vra-delete-modal-title">',
+        '  <h2 id="vra-delete-modal-title">Delete original listing?</h2>',
+        "  <p>This will open the original Vinted listing and confirm deletion automatically. Only continue after you have reviewed the new draft.</p>",
+        '  <div class="vra-modal-actions">',
+        '    <button type="button" data-vra-cancel>Cancel</button>',
+        '    <button type="button" data-vra-confirm>Delete original</button>',
+        "  </div>",
+        "</div>"
+      ].join("");
+
+      const onKeydown = (event) => {
+        if (event.key === "Escape") close(false);
+      };
+
+      const close = (result) => {
+        document.removeEventListener("keydown", onKeydown);
+        backdrop.remove();
+        resolve(result);
+      };
+
+      backdrop.addEventListener("click", (event) => {
+        if (event.target === backdrop) close(false);
+      });
+      backdrop.querySelector("[data-vra-cancel]").addEventListener("click", () => close(false));
+      backdrop.querySelector("[data-vra-confirm]").addEventListener("click", () => close(true));
+      document.addEventListener("keydown", onKeydown);
+
+      document.body.appendChild(backdrop);
+      backdrop.querySelector("[data-vra-cancel]").focus();
+    });
+  }
+
   function handleWorkflowStatus(message) {
     if (message.message) {
       showToast(message.message, message.kind || kindFromStatus(message.status));
@@ -212,8 +355,15 @@
     const button = findWorkflowButton(message);
     if (!button) return;
 
-    if (message.status === "form_filled" || message.status === "failed") {
-      setButtonBusy(button, false);
+    setButtonStatus(button, message.status);
+
+    if (message.status === "form_filled") {
+      if (message.draftTabId) button.dataset.vraDraftTabId = String(message.draftTabId);
+      clearButtonWorkflow(button, message.workflowId || message.backupId);
+      return;
+    }
+
+    if (message.status === "failed") {
       clearButtonWorkflow(button, message.workflowId || message.backupId);
     }
   }
@@ -233,6 +383,30 @@
     return document.querySelector(`[${BUTTON_ATTR}][data-vra-item-id="${cssEscape(message.itemId)}"]`);
   }
 
+  function handleDeleteStatus(message) {
+    if (message.message) {
+      showToast(message.message, message.kind || kindFromStatus(message.status));
+    }
+
+    const button = findDeleteButton(message.itemId);
+    if (!button) return;
+
+    if (message.status === "deleted") {
+      button.textContent = "✓";
+      button.disabled = true;
+    } else if (message.status === "delete_failed") {
+      button.textContent = "🗑";
+      button.disabled = false;
+    }
+  }
+
+  function findDeleteButton(itemId) {
+    if (!itemId) return null;
+    const relistButton = document.querySelector(`[${BUTTON_ATTR}][data-vra-item-id="${cssEscape(itemId)}"]`);
+    const wrapper = relistButton && relistButton.closest(".vra-button-wrap");
+    return wrapper ? wrapper.querySelector(".vra-delete-button") : null;
+  }
+
   function clearButtonWorkflow(button, workflowId) {
     if (workflowId) activeButtons.delete(workflowId);
     if (button && button.dataset.vraWorkflowId === workflowId) {
@@ -246,9 +420,44 @@
     return "info";
   }
 
-  function setButtonBusy(button, busy) {
-    button.disabled = busy;
-    button.textContent = busy ? ACTIVE_TEXT : DEFAULT_TEXT;
+  function setButtonStatus(button, status) {
+    if (!button) return;
+    const isReady = status === "form_filled";
+    const isFailed = status === "failed";
+    button.disabled = !isReady && !isFailed;
+    button.textContent = STATUS_LABELS[status] || STATUS_LABELS.started;
+    button.dataset.vraStatus = status || "";
+    updateSplitControls(button, isReady);
+  }
+
+  function updateSplitControls(button, isReady) {
+    const wrapper = button.closest(".vra-button-wrap");
+    if (!wrapper) return;
+
+    const resetButton = wrapper.querySelector(".vra-reset-button");
+    const deleteButton = wrapper.querySelector(".vra-delete-button");
+    wrapper.classList.toggle("vra-button-wrap--ready", isReady);
+    button.style.width = isReady ? "100%" : "var(--vra-bump-width, 72px)";
+
+    if (resetButton) {
+      resetButton.hidden = !isReady;
+    }
+
+    if (deleteButton) {
+      deleteButton.hidden = !isReady;
+      if (isReady) {
+        deleteButton.disabled = false;
+        deleteButton.textContent = "🗑";
+      }
+    }
+  }
+
+  function resetButtonForRelist(button) {
+    delete button.dataset.vraDraftTabId;
+    delete button.dataset.vraStatus;
+    button.disabled = false;
+    button.textContent = DEFAULT_TEXT;
+    updateSplitControls(button, false);
   }
 
   function showToast(message, kind) {

@@ -71,10 +71,6 @@
       warnings.push("description");
     }
 
-    if (!fillPrice(backup.price && backup.price.amount ? backup.price.amount : "")) {
-      warnings.push("price");
-    }
-
     const attributes = { ...(backup.attributes || {}) };
     if (!attributes.size) {
       attributes.size = inferSizeFromListingTitle(backup.title || "");
@@ -124,6 +120,13 @@
         failedFields.push(label);
       }
       await delay(500);
+    }
+
+    debugFill("field:start", { field: "price", value: backup.price && backup.price.amount ? backup.price.amount : "" });
+    const priceHandled = await fillPrice(backup.price && backup.price.amount ? backup.price.amount : "");
+    debugFill("field:finish", { field: "price", value: backup.price && backup.price.amount ? backup.price.amount : "", handled: priceHandled });
+    if (!priceHandled) {
+      warnings.push("price");
     }
 
     const blockingFailures = failedFields.filter((field) => isBlockingFillField(field, attributes));
@@ -180,14 +183,15 @@
     return true;
   }
 
-  function fillPrice(value) {
+  async function fillPrice(value) {
     if (!value) return false;
-    const amount = String(value).replace(/[^\d.,]/g, "");
+    const amount = priceTextForTyping(value);
     const control = findInputByNames(["price", "amount"], 'input:not([type="file"]):not([type="hidden"])') ||
       Array.from(document.querySelectorAll('input[inputmode="decimal"], input[inputmode="numeric"], input[type="number"], input[type="text"]'))
         .find((input) => isVisible(input) && /price|amount|£|gbp/i.test(labelTextFor(input) + " " + nearbyText(input)));
     if (!control) return false;
-    setControlValue(control, amount);
+    await commitPriceValue(control, amount);
+    debugFill("price:filled", { typed: amount, value: control.value || "" });
     return true;
   }
 
@@ -2085,6 +2089,11 @@
       return;
     }
 
+    setNativeControlValue(control, value);
+    dispatchInputEvents(control);
+  }
+
+  function setNativeControlValue(control, value) {
     const prototype = Object.getPrototypeOf(control);
     const descriptor = Object.getOwnPropertyDescriptor(prototype, "value");
     if (descriptor && descriptor.set) {
@@ -2092,7 +2101,6 @@
     } else {
       control.value = value;
     }
-    dispatchInputEvents(control);
   }
 
   function pasteControlValue(control, value) {
@@ -2110,6 +2118,30 @@
       control.dispatchEvent(new Event("input", { bubbles: true }));
     }
     control.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: String(value).slice(-1) || " " }));
+  }
+
+  function priceTextForTyping(value) {
+    const raw = String(value || "").replace(/[^\d.,]/g, "").trim();
+    const normalized = raw.includes(",") && !raw.includes(".") ? raw.replace(",", ".") : raw.replace(/,/g, "");
+    return normalized.replace(/\.00$/, "");
+  }
+
+  async function commitPriceValue(control, value) {
+    if (typeof control.focus === "function") control.focus();
+    if (typeof control.click === "function") control.click();
+
+    setControlValue(control, value);
+    await delay(100);
+    if (typeof control.focus === "function") control.focus();
+
+    const key = String(value || "").slice(-1) || "0";
+    control.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key }));
+    control.dispatchEvent(new KeyboardEvent("keypress", { bubbles: true, cancelable: true, key }));
+    control.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key }));
+    control.dispatchEvent(new Event("input", { bubbles: true }));
+    control.dispatchEvent(new Event("change", { bubbles: true }));
+    await delay(100);
+    control.dispatchEvent(new Event("blur", { bubbles: true }));
   }
 
   function dispatchInputEvents(control) {

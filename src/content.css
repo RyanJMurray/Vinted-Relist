@@ -30,11 +30,68 @@
 .vra-button-wrap {
   display: flex;
   flex: 0 0 100%;
+  gap: 0;
   margin-left: 0;
   margin-top: 6px;
   position: relative;
   width: fit-content;
   z-index: 5;
+}
+
+.vra-button-wrap--ready {
+  display: grid;
+  gap: 2px;
+  grid-template-columns: minmax(0, 8fr) minmax(0, 1fr) minmax(0, 1fr);
+  width: var(--vra-bump-width, 72px);
+}
+
+.vra-button-wrap--ready .vra-relist-button {
+  min-width: 0;
+  padding: 0 4px;
+  width: 100%;
+}
+
+.vra-reset-button,
+.vra-delete-button {
+  align-items: center;
+  appearance: none;
+  background: #ffffff;
+  border: 1px solid #0b6b5f;
+  border-radius: 6px;
+  color: #0b6b5f;
+  cursor: pointer;
+  display: inline-flex;
+  font: 700 10px/1 Arial, sans-serif;
+  height: var(--vra-bump-height, 32px);
+  justify-content: center;
+  min-width: 0;
+  padding: 0;
+  width: 100%;
+}
+
+.vra-reset-button:hover {
+  background: #e9f6f3;
+}
+
+.vra-delete-button {
+  border-color: #b42318;
+  color: #b42318;
+}
+
+.vra-delete-button:hover {
+  background: #fdecea;
+}
+
+.vra-delete-button:disabled {
+  background: #f7d9d7;
+  border-color: #d98b84;
+  color: #8f2f27;
+  cursor: default;
+}
+
+.vra-reset-button[hidden],
+.vra-delete-button[hidden] {
+  display: none;
 }
 
 .vra-modal-backdrop {
