@@ -43,9 +43,11 @@
   const category = extractCategory(attributes.brand);
   if (category) attributes.category = category;
 
-  const previewImageUrls = extractNumberedPreviewImages(title);
+  const previewImageElements = getNumberedPreviewImageElements(title);
+  const previewImageUrls = previewImageElements.map(bestImageUrl).filter(Boolean);
   const embeddedImageUrls = extractEmbeddedListingImages(previewImageUrls);
-  if (embeddedImageUrls.length <= previewImageUrls.length) {
+  const expectedImageCount = expectedImageCountFromPreviewLabels(previewImageElements);
+  if (expectedImageCount && embeddedImageUrls.length < expectedImageCount) {
     await openFullImageCarouselIfPossible(title);
   }
   const imageUrls = extractImages(jsonLdProduct, title, embeddedImageUrls);
@@ -964,11 +966,15 @@
 
   function extractImages(product, titleText, embeddedImageUrls) {
     const titleKey = compareText(titleText);
+    const carouselImages = extractCarouselImages();
+    if (carouselImages.length && (!embeddedImageUrls || carouselImages.length > embeddedImageUrls.length)) {
+      return dedupe(carouselImages.map(toAbsoluteUrl).filter(Boolean));
+    }
+
     if (embeddedImageUrls && embeddedImageUrls.length) {
       return dedupe(embeddedImageUrls.map(toAbsoluteUrl).filter(Boolean));
     }
 
-    const carouselImages = extractCarouselImages();
     if (carouselImages.length) {
       return dedupe(carouselImages.map(toAbsoluteUrl).filter(Boolean));
     }
@@ -1074,7 +1080,7 @@
     let lastCount = 0;
     let stableCount = 0;
     let lastNextClickAt = 0;
-    while (Date.now() - startedAt < 7000) {
+    while (Date.now() - startedAt < 3500) {
       rememberCarouselImages();
       const currentCount = extractCarouselImages().length;
       const hasExpectedImages = expectedCount ? currentCount >= expectedCount : currentCount > previews.length;
