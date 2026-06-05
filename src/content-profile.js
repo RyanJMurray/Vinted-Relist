@@ -10,6 +10,7 @@
   const BUTTON_LIKE_SELECTOR = 'button, a, [role="button"], input[type="button"], input[type="submit"]';
   const DEFAULT_TEXT = "Relist";
   const READY_TEXT = "Review";
+  const MAX_BATCH_SELECTIONS = 3;
   const STATUS_LABELS = {
     started: "Starting Draft...",
     item_page_opened: "Retrieving Listing Data...",
@@ -73,6 +74,7 @@
       const button = createRelistButton(itemId, itemUrl, cardTitle);
       insertButtonNearBumpButton(bumpControl, button);
     }
+    updateSelectionLimitState();
   }
 
   function extractItemId(link) {
@@ -138,6 +140,13 @@
       selectedItems.delete(itemId);
       button.setAttribute("aria-pressed", "false");
       card.classList.remove("vra-card-selected");
+      updateSelectionLimitState();
+      return;
+    }
+
+    if (selectedItems.size >= MAX_BATCH_SELECTIONS) {
+      updateSelectionLimitState();
+      showToast(`You can select up to ${MAX_BATCH_SELECTIONS} listings at once.`, "warning", "selection-limit");
       return;
     }
 
@@ -148,6 +157,21 @@
     });
     button.setAttribute("aria-pressed", "true");
     card.classList.add("vra-card-selected");
+    updateSelectionLimitState();
+  }
+
+  function updateSelectionLimitState() {
+    const limitReached = selectedItems.size >= MAX_BATCH_SELECTIONS;
+    for (const button of document.querySelectorAll(`[${SELECT_ATTR}]`)) {
+      const itemId = button.dataset.vraItemId || "";
+      const isSelected = selectedItems.has(itemId);
+      const isBlocked = limitReached && !isSelected;
+      button.classList.toggle("vra-select-toggle--blocked", isBlocked);
+      button.setAttribute("aria-disabled", isBlocked ? "true" : "false");
+      button.title = isBlocked
+        ? `Unselect another listing first. Maximum ${MAX_BATCH_SELECTIONS} at once.`
+        : "Select listing for batch relist";
+    }
   }
 
   function selectedRelistItems() {
@@ -167,6 +191,7 @@
     for (const card of document.querySelectorAll(".vra-card-selected")) {
       card.classList.remove("vra-card-selected");
     }
+    updateSelectionLimitState();
   }
 
   function createRelistButton(itemId, itemUrl, cardTitle) {
@@ -452,7 +477,7 @@
   }
 
   function handleWorkflowStatus(message) {
-    if (message.message) {
+    if (message.message && shouldShowWorkflowToast(message.status)) {
       showToast(message.message, message.kind || kindFromStatus(message.status));
     }
 
@@ -524,6 +549,10 @@
     return "info";
   }
 
+  function shouldShowWorkflowToast(status) {
+    return status === "form_filled" || status === "failed";
+  }
+
   function setButtonStatus(button, status) {
     if (!button) return;
     const isReady = status === "form_filled";
@@ -564,7 +593,7 @@
     updateSplitControls(button, false);
   }
 
-  function showToast(message, kind) {
+  function showToast(message, kind, key) {
     let stack = document.querySelector(".vra-toast-stack");
     if (!stack) {
       stack = document.createElement("div");
@@ -572,13 +601,20 @@
       document.documentElement.appendChild(stack);
     }
 
-    const toast = document.createElement("div");
-    toast.className = "vra-toast";
+    let toast = key ? stack.querySelector(`.vra-toast[data-toast-key="${cssEscape(key)}"]`) : null;
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.className = "vra-toast";
+      if (key) toast.dataset.toastKey = key;
+      stack.appendChild(toast);
+    } else if (toast.vraTimeoutId) {
+      window.clearTimeout(toast.vraTimeoutId);
+    }
+
     toast.dataset.kind = kind || "info";
     toast.textContent = message;
-    stack.appendChild(toast);
 
-    window.setTimeout(() => {
+    toast.vraTimeoutId = window.setTimeout(() => {
       toast.remove();
       if (!stack.childElementCount) stack.remove();
     }, kind === "error" ? 9000 : 6000);

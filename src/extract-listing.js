@@ -387,6 +387,9 @@
 
     mergeStructuredAttributes(attributes, extractLabelledAttributePairs(rootElement, labelMap));
     mergeItempropAttributes(attributes, extractItempropAttributes(rootElement));
+    if (rootElement !== document) {
+      mergeItempropAttributes(attributes, extractItempropAttributes(document));
+    }
     return attributes;
   }
 
@@ -434,6 +437,10 @@
 
   function extractItempropAttributes(rootElement) {
     const attributes = {};
+    const sizeNode = rootElement.querySelector('.details-list__item-value[itemprop="size"], [itemprop="size"]');
+    const sizeValue = cleanAttributeValue(cleanTextFromElement(sizeNode), "Size");
+    if (sizeValue) attributes.size = sizeValue;
+
     const colourNodes = Array.from(rootElement.querySelectorAll('[itemprop="color"], [itemprop="colour"]'));
 
     for (const node of colourNodes) {
@@ -1466,6 +1473,7 @@
 
   function listingAttributeProbe() {
     const itempropColourCount = document.querySelectorAll('[itemprop="color"], [itemprop="colour"]').length;
+    const itempropSizeCount = document.querySelectorAll('[itemprop="size"]').length;
     const detailsValueCount = document.querySelectorAll(".details-list__item-value").length;
     const attributeNodeCount = document.querySelectorAll('[data-testid^="item-attributes-"], .details-list__item').length;
     const text = document.body ? document.body.innerText || "" : "";
@@ -1473,10 +1481,11 @@
 
     return {
       itempropColourCount,
+      itempropSizeCount,
       detailsValueCount,
       attributeNodeCount,
       hasColourText,
-      hasAttributes: itempropColourCount > 0 || detailsValueCount > 0 || attributeNodeCount > 0 || hasColourText
+      hasAttributes: itempropColourCount > 0 || itempropSizeCount > 0 || detailsValueCount > 0 || attributeNodeCount > 0 || hasColourText
     };
   }
 

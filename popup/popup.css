@@ -3,31 +3,31 @@
 }
 
 body {
-  background: #f6f8f7;
+  background: #eef4f2;
   color: #17211f;
   font: 14px/1.4 Arial, sans-serif;
   margin: 0;
-  min-width: 360px;
+  min-width: 430px;
 }
 
 header {
   align-items: center;
-  background: #fff;
-  border-bottom: 1px solid #dce4e1;
+  background: #ffffff;
+  border-bottom: 1px solid #d8e4e0;
   display: flex;
   gap: 12px;
   justify-content: space-between;
-  padding: 14px;
+  padding: 14px 16px;
 }
 
 h1 {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.2;
   margin: 0;
 }
 
 main {
-  padding: 12px 14px;
+  padding: 12px 14px 14px;
 }
 
 button {
@@ -46,41 +46,54 @@ button:hover {
 }
 
 .status {
-  background: #eaf3f1;
-  border: 1px solid #cee1dc;
+  background: #ffffff;
+  border: 1px solid #d8e4e0;
   border-radius: 8px;
   margin-bottom: 12px;
-  padding: 10px;
+  padding: 10px 12px;
 }
 
 .status p {
+  color: #40524e;
+  font-size: 13px;
   margin: 0;
 }
 
 .backup-list {
   display: grid;
-  gap: 10px;
+  gap: 12px;
   max-height: 460px;
   overflow: auto;
+  padding-right: 2px;
 }
 
 .backup {
   background: #fff;
-  border: 1px solid #dce4e1;
+  border: 1px solid #d8e4e0;
   border-radius: 8px;
-  padding: 10px;
+  box-shadow: 0 8px 24px rgba(17, 24, 39, 0.08);
+  padding: 12px;
 }
 
 .backup h2 {
+  color: #111c19;
   font-size: 14px;
   line-height: 1.25;
-  margin: 0 0 6px;
+  margin: 0 0 8px;
 }
 
 .meta {
   color: #586763;
   font-size: 12px;
-  margin: 0 0 8px;
+  margin: 0;
+}
+
+.row {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 
 .status-pill {
@@ -89,7 +102,6 @@ button:hover {
   display: inline-block;
   font-size: 12px;
   font-weight: 700;
-  margin-bottom: 8px;
   padding: 3px 8px;
 }
 
@@ -103,8 +115,55 @@ button:hover {
   color: #075249;
 }
 
+.image-strip {
+  display: grid;
+  gap: 6px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0 0 10px;
+}
+
+.image-strip-empty {
+  background: #f3f7f5;
+  border: 1px dashed #c8d5d1;
+  border-radius: 8px;
+  color: #6a7975;
+  display: block;
+  font-size: 12px;
+  padding: 12px;
+  text-align: center;
+}
+
+.image-thumb {
+  aspect-ratio: 1;
+  border: 1px solid #d8e4e0;
+  border-radius: 7px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  position: relative;
+}
+
+.image-thumb img {
+  display: block;
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.image-more {
+  align-items: center;
+  background: rgba(17, 24, 39, 0.68);
+  color: #ffffff;
+  display: flex;
+  font-size: 16px;
+  font-weight: 700;
+  inset: 0;
+  justify-content: center;
+  position: absolute;
+}
+
 .details {
-  color: #2b3835;
+  color: #40524e;
   font-size: 12px;
   margin: 0 0 10px;
 }
@@ -127,9 +186,19 @@ button:hover {
   color: #795600;
 }
 
+.fill-failures p {
+  margin: 0 0 4px;
+}
+
+.fill-failures ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
 .actions {
   display: flex;
   gap: 8px;
+  justify-content: flex-end;
 }
 
 footer {
@@ -138,8 +207,81 @@ footer {
   padding: 10px 14px;
 }
 
+#clear-expired {
+  border-color: #b42318;
+  color: #b42318;
+}
+
+#clear-expired:hover {
+  background: #fdecea;
+}
+
+#clear-expired:disabled {
+  background: #f3e0de;
+  cursor: default;
+  opacity: 0.75;
+}
+
 .empty {
   color: #586763;
   margin: 18px 0;
   text-align: center;
+}
+
+.image-modal {
+  align-items: center;
+  background: rgba(13, 20, 18, 0.72);
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  padding: 18px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 1000;
+}
+
+.image-modal[hidden] {
+  display: none;
+}
+
+.image-modal-panel {
+  background: #ffffff;
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+  max-width: 94vw;
+  padding: 10px;
+  width: 560px;
+}
+
+.image-modal-top {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.image-modal-top a {
+  color: #075249;
+  font-weight: 700;
+  margin-right: 8px;
+  text-decoration: none;
+}
+
+.image-modal-stage {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.image-modal-stage img {
+  background: #f2f5f4;
+  border-radius: 7px;
+  display: block;
+  max-height: 70vh;
+  object-fit: contain;
+  width: 100%;
 }

@@ -7,9 +7,11 @@ const RETENTION_MS = 24 * 60 * 60 * 1000;
 const DB_NAME = "vinted-relist-assistant";
 const DB_VERSION = 1;
 const IMAGE_STORE = "images";
+const DRAFT_START_SPACING_MS = 7000;
 
 const activeRuns = new Map();
 let backupIndexWrite = Promise.resolve();
+let nextDraftStartAt = 0;
 
 chrome.runtime.onInstalled.addListener(() => {
   cleanupExpiredBackups().catch(() => {});
@@ -48,6 +50,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     cleanupExpiredBackups()
       .then(() => getBackups())
       .then((backups) => sendResponse({ ok: true, backups }))
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
+  }
+
+  if (message.type === "CLEAR_ALL_BACKUPS") {
+    clearAllBackups()
+      .then(() => sendResponse({ ok: true, backups: [] }))
       .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
     return true;
   }
@@ -132,6 +141,7 @@ async function runWorkflow(context) {
     await closeTabIfOpen(tempTabId);
     tempTabId = null;
 
+    await waitForDraftStartSlot();
     const sellTab = await tabsCreate({ url: SELL_URL, active: false, openerTabId: context.originTabId });
     sellTabId = sellTab.id;
     backup.draftTabId = sellTabId;
@@ -339,22 +349,37 @@ function validateExtractedBackup(backup) {
 }
 
 async function executeExtractor(tabId) {
-  const results = await executeScriptFile(tabId, "src/extract-listing.js");
-  return results && results[0] ? results[0].result : null;
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      await waitForTabComplete(tabId, 15000).catch(() => {});
+      await delay(150 * attempt);
+      const results = await executeScriptFile(tabId, "src/extract-listing.js");
+      return results && results[0] ? results[0].result : null;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientTabError(error) || attempt === 3) break;
+      await delay(400 * attempt);
+    }
+  }
+
+  throw lastError || new Error("Could not extract listing data.");
 }
 
 async function sendFillMessageWithRetry(tabId, payload) {
   let lastError = null;
 
-  for (let attempt = 1; attempt <= 3; attempt += 1) {
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
     try {
       return await sendTabMessage(tabId, payload);
     } catch (error) {
       lastError = error;
-      if (!isTransientMessageError(error) || attempt === 3) break;
+      if (!isTransientTabError(error) || attempt === 5) break;
 
-      await delay(350 * attempt);
+      await delay(500 * attempt);
       await waitForTabComplete(tabId, 15000).catch(() => {});
+      await delay(150);
       await executeScriptFile(tabId, "src/fill-form.js").catch(() => {});
     }
   }
@@ -362,9 +387,9 @@ async function sendFillMessageWithRetry(tabId, payload) {
   throw lastError || new Error("Could not fill the new listing form.");
 }
 
-function isTransientMessageError(error) {
+function isTransientTabError(error) {
   const message = error && error.message ? error.message : String(error || "");
-  return /message channel closed|receiving end does not exist|could not establish connection|extension context invalidated/i.test(message);
+  return /message channel closed|receiving end does not exist|could not establish connection|extension context invalidated|frame was removed|no tab with id|tab was closed|cannot access contents|tab was updated|page changed/i.test(message);
 }
 
 async function cacheImagesForBackup(backup) {
@@ -521,7 +546,28 @@ async function getBackups() {
     .filter((key) => key.startsWith(BACKUP_PREFIX))
     .map((key) => all[key])
     .filter(Boolean)
+    .filter(isDisplayableBackup)
     .sort((a, b) => Date.parse(b.createdAt || 0) - Date.parse(a.createdAt || 0));
+}
+
+function isDisplayableBackup(backup) {
+  if (!backup || typeof backup !== "object") return false;
+  if (!backup.createdAt || !backup.itemId) return false;
+  if (backup.title || backup.cardTitle || backup.description) return true;
+  if (backup.price && backup.price.amount) return true;
+  if (backup.attributes && Object.values(backup.attributes).some(Boolean)) return true;
+  return Array.isArray(backup.images) && backup.images.some((image) => image && image.originalUrl);
+}
+
+async function waitForDraftStartSlot() {
+  const now = Date.now();
+  const scheduledAt = Math.max(now, nextDraftStartAt);
+  nextDraftStartAt = scheduledAt + DRAFT_START_SPACING_MS;
+
+  const waitMs = scheduledAt - now;
+  if (waitMs > 0) {
+    await delay(waitMs);
+  }
 }
 
 async function saveBackup(backup) {
@@ -565,6 +611,16 @@ async function cleanupExpiredBackups() {
   }
 
   await deleteExpiredImageRecords(now, expiredBackupIds);
+}
+
+async function clearAllBackups() {
+  const all = await storageGet(null);
+  const removeKeys = Object.keys(all).filter((key) => key.startsWith(BACKUP_PREFIX) || key === BACKUP_INDEX_KEY);
+  if (removeKeys.length) {
+    await storageRemove(removeKeys);
+  }
+
+  await clearImageRecords();
 }
 
 function normalizeMessages(messages) {
@@ -779,6 +835,16 @@ async function deleteExpiredImageRecords(now, expiredBackupIds) {
 
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => reject(transaction.error || new Error("Could not clean image cache."));
+  });
+}
+
+async function clearImageRecords() {
+  const db = await openDb();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(IMAGE_STORE, "readwrite");
+    transaction.objectStore(IMAGE_STORE).clear();
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error("Could not clear image cache."));
   });
 }
 

@@ -527,7 +527,7 @@
 
     for (const cell of candidates) {
       const title = sizeOptionTitle(cell);
-      if (aliases.includes(normalizeSize(title))) return cell;
+      if (sizeTitleMatches(title, aliases)) return cell;
     }
 
     return null;
@@ -695,7 +695,7 @@
   function currentSizeSelectionMatches(size) {
     const opener = findSizeOpener();
     const openerValue = cleanText((opener && (opener.value || opener.getAttribute("value") || opener.textContent)) || "");
-    return openerValue && sizeAliases(size).includes(normalizeSize(openerValue));
+    return openerValue && sizeTitleMatches(openerValue, sizeAliases(size));
   }
 
   function findConditionOption(value) {
@@ -1193,19 +1193,18 @@
     if (!raw) return "";
     if (/one size/i.test(raw)) return "One size";
 
-    const alphaSizeMatch = raw.match(/\b(?:XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL)\b/i);
+    const brandless = raw.replace(/^(?:nike|adidas|puma|reebok|new balance|converse|vans)\s*/i, "").trim();
+
+    const alphaSizeMatch = brandless.match(/^(?:XXXS|XXS|XS|S|M|L|XL|XXL|XXXL|XXXXL)$/i);
     if (alphaSizeMatch) return alphaSizeMatch[0].toUpperCase();
 
-    const wordSize = wordSizeAlias(raw);
+    const wordSize = wordSizeAlias(brandless);
     if (wordSize) return wordSize;
 
-    const ukMatch = raw.match(/\bUK\s*(\d+(?:\.\d+)?)\b/i);
+    const ukMatch = brandless.match(/^UK\s*(\d+(?:\.\d+)?)$/i);
     if (ukMatch) return ukMatch[1];
 
-    const numberMatches = Array.from(raw.matchAll(/\d+(?:\.\d+)?/g)).map((match) => match[0]);
-    if (numberMatches.length) return numberMatches[numberMatches.length - 1];
-
-    return raw.replace(/^(?:nike|adidas|puma|reebok|new balance|converse|vans)\s*/i, "").trim();
+    return brandless;
   }
 
   function normalizeSize(value) {
@@ -1254,6 +1253,26 @@
     if (ukMatch) output.push(ukMatch[1], `UK ${ukMatch[1]}`);
 
     return Array.from(new Set(output.map(normalizeSize).filter(Boolean)));
+  }
+
+  function sizeTitleMatches(title, aliases) {
+    const normalizedTitle = normalizeSize(title);
+    if (!normalizedTitle) return false;
+    if (aliases.includes(normalizedTitle)) return true;
+
+    const titleParts = sizeLabelParts(title);
+    return aliases.some((alias) => {
+      if (!alias) return false;
+      if (titleParts.includes(alias)) return true;
+      return titleParts.some((part) => part === alias || (alias.length >= 3 && part.startsWith(alias)));
+    });
+  }
+
+  function sizeLabelParts(value) {
+    return String(value || "")
+      .split(/\s*(?:,|;|\||\/|>|›|\n)\s*/g)
+      .map(normalizeSize)
+      .filter(Boolean);
   }
 
   function wordSizeAlias(value) {
@@ -2130,14 +2149,29 @@
     if (typeof control.focus === "function") control.focus();
     if (typeof control.click === "function") control.click();
 
-    setControlValue(control, value);
-    await delay(100);
-    if (typeof control.focus === "function") control.focus();
+    control.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "a", ctrlKey: true }));
+    control.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key: "a", ctrlKey: true }));
+    setControlValue(control, "");
+    await delay(50);
 
-    const key = String(value || "").slice(-1) || "0";
-    control.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key }));
-    control.dispatchEvent(new KeyboardEvent("keypress", { bubbles: true, cancelable: true, key }));
-    control.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key }));
+    for (const key of String(value || "")) {
+      control.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key }));
+      control.dispatchEvent(new KeyboardEvent("keypress", { bubbles: true, cancelable: true, key }));
+      setNativeControlValue(control, `${control.value || ""}${key}`);
+      try {
+        control.dispatchEvent(new InputEvent("input", {
+          bubbles: true,
+          cancelable: true,
+          data: key,
+          inputType: "insertText"
+        }));
+      } catch (_error) {
+        control.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      control.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, cancelable: true, key }));
+      await delay(30);
+    }
+
     control.dispatchEvent(new Event("input", { bubbles: true }));
     control.dispatchEvent(new Event("change", { bubbles: true }));
     await delay(100);

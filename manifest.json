@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Vinted Relist Assistant",
   "version": "0.1.1",
-  "description": "Clone your own Vinted listings into a new listing form for manual review.",
+  "description": "Clone your Vinted listings into a new listing form for manual review.",
   "permissions": ["storage", "tabs", "scripting"],
   "host_permissions": [
     "https://www.vinted.co.uk/*",
@@ -14,6 +14,9 @@
   "action": {
     "default_title": "Vinted Relist Assistant",
     "default_popup": "popup/popup.html"
+  },
+  "icons": {
+    "128": "icons/vinted_relist.png"
   },
   "content_scripts": [
     {
