@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Vinted Relist Assistant",
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Clone your Vinted listings into a new listing form for manual review.",
   "permissions": ["storage", "tabs", "scripting"],
   "host_permissions": [
