@@ -568,6 +568,7 @@
 
   function findSizeOpener() {
     const exact = Array.from(document.querySelectorAll([
+      '[data-testid="category-size-single-grid-input"]',
       '[data-testid="size-select-dropdown-input"]',
       '#size',
       'input[name="size"]'
@@ -617,7 +618,9 @@
 
   function findOpenSizeDropdownContent() {
     const exact = Array.from(document.querySelectorAll([
+      '[data-testid="category-size-single-grid-content"]',
       '[data-testid="size-select-dropdown-content"]',
+      '.input-dropdown[data-testid="category-size-single-grid-content"]',
       '.input-dropdown[data-testid="size-select-dropdown-content"]'
     ].join(","))).find(isVisible);
     if (exact) return exact;
@@ -627,6 +630,7 @@
     ].join(","))).find((element) => isVisible(element) && element.querySelector([
       '[data-testid^="suggested-size-"][role="button"]',
       '[id^="suggested-size-"][role="button"]',
+      '[data-testid^="size-group-"][role="checkbox"]',
       '[data-testid^="size-"][role="button"]',
       '[id^="size-"][role="button"]',
       '[data-testid^="suggested-size-"]',
@@ -641,17 +645,18 @@
     return Array.from(root.querySelectorAll([
       '[data-testid^="suggested-size-"][role="button"]',
       '[id^="suggested-size-"][role="button"]',
+      '[data-testid^="size-group-"][role="checkbox"]',
       '[data-testid^="size-"][role="button"]',
       '[id^="size-"][role="button"]',
       '[data-testid^="suggested-size-"]',
       '[data-testid^="size-"]'
     ].join(",")))
-      .filter((cell) => /^(?:suggested-)?size-\d+$/.test(cell.getAttribute("data-testid") || cell.id || ""))
-      .filter((cell) => cell.querySelector('[data-testid^="suggested-size-"][data-testid$="-title"], [data-testid^="size-"][data-testid$="-title"], .web_ui__Cell__title, [class*="web_ui__Cell__title"]'));
+      .filter((cell) => /^(?:suggested-)?size-\d+$/.test(cell.getAttribute("data-testid") || cell.id || "") || /^size-group-\d+-grid-option-\d+$/.test(cell.getAttribute("data-testid") || ""))
+      .filter((cell) => cell.getAttribute("aria-label") || cell.querySelector('[data-testid^="suggested-size-"][data-testid$="-title"], [data-testid^="size-"][data-testid$="-title"], .web_ui__Cell__title, [class*="web_ui__Cell__title"], .web_ui__Text__text, [class*="web_ui__Text__text"]'));
   }
 
   function sizeOptionTitle(cell) {
-    return cleanText((cell.querySelector('[data-testid^="suggested-size-"][data-testid$="-title"], [data-testid^="size-"][data-testid$="-title"], .web_ui__Cell__title, [class*="web_ui__Cell__title"]') || {}).textContent || "");
+    return cleanText(cell.getAttribute("aria-label") || (cell.querySelector('[data-testid^="suggested-size-"][data-testid$="-title"], [data-testid^="size-"][data-testid$="-title"], .web_ui__Cell__title, [class*="web_ui__Cell__title"], .web_ui__Text__text, [class*="web_ui__Text__text"]') || {}).textContent || "");
   }
 
   async function selectSizeOption(option, size) {
@@ -667,8 +672,12 @@
       await delay(40);
 
       for (const target of sizeOptionClickTargets(currentOption)) {
-        activateOption(target);
-        const selected = await waitForOptional(() => currentSizeSelectionMatches(size), 650);
+        if (isSizeGridOption(target)) {
+          clickElement(target);
+        } else {
+          activateOption(target);
+        }
+        const selected = await waitForOptional(() => currentSizeSelectionMatches(size) || sizeGridOptionSelected(currentOption), 650);
         if (selected) return true;
       }
 
@@ -690,6 +699,14 @@
       option.querySelector('label[for^="suggested-size-radio-"], label[for^="size-radio-"]'),
       option.querySelector('input[type="radio"]')
     ].filter(Boolean)));
+  }
+
+  function isSizeGridOption(element) {
+    return Boolean(element && element.matches && element.matches('[data-testid^="size-group-"][role="checkbox"]'));
+  }
+
+  function sizeGridOptionSelected(option) {
+    return isSizeGridOption(option) && option.getAttribute("aria-checked") === "true";
   }
 
   function currentSizeSelectionMatches(size) {
